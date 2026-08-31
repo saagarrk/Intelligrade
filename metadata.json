@@ -1,0 +1,6 @@
+{
+  "name": "IntelliGrade - AI Handwritten Answer Sheet Evaluator",
+  "description": "Automated pipeline for preprocessing, OCR digitization, NLP semantic grading, and predictive feedback for handwritten student answer sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

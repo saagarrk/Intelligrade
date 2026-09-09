@@ -7,15 +7,35 @@ import {
   PredictiveAnalytics 
 } from '../types';
 
+const STOP_WORDS = new Set([
+  'the', 'and', 'for', 'are', 'with', 'from', 'that', 'this', 'have',
+  'has', 'was', 'were', 'which', 'their', 'there', 'they', 'what', 'when',
+  'can', 'could', 'should', 'would', 'into', 'over', 'than', 'then'
+]);
+
+/**
+ * Normalizes and stems common English word endings for morphological matching
+ */
+export function stemWord(w: string): string {
+  let s = w.toLowerCase().trim();
+  if (s.endsWith('ing') && s.length > 5) s = s.slice(0, -3);
+  else if (s.endsWith('ed') && s.length > 4) s = s.slice(0, -2);
+  else if (s.endsWith('es') && s.length > 4) s = s.slice(0, -2);
+  else if (s.endsWith('s') && s.length > 3 && !s.endsWith('ss')) s = s.slice(0, -1);
+  else if (s.endsWith('ic') && s.length > 4) s = s.slice(0, -2);
+  else if (s.endsWith('tion') && s.length > 6) s = s.slice(0, -4);
+  return s;
+}
+
 /**
  * Tokenizes text into normalized word set
  */
 export function tokenizeWords(text: string): string[] {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9_\-\s]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(w => w.length > 2);
+    .filter(w => w.length > 1 && !STOP_WORDS.has(w));
 }
 
 /**
@@ -27,22 +47,29 @@ export function calculateSemanticSimilarity(studentText: string, modelText: stri
 
   if (studentTokens.length === 0 || modelTokens.length === 0) return 15;
 
-  const studentSet = new Set(studentTokens);
-  const modelSet = new Set(modelTokens);
+  const studentStems = studentTokens.map(stemWord);
+  const modelStems = modelTokens.map(stemWord);
+
+  const studentSet = new Set(studentStems);
+  const modelSet = new Set(modelStems);
 
   let intersectionCount = 0;
   modelSet.forEach(token => {
-    if (studentSet.has(token)) intersectionCount++;
+    // Exact stem match or fuzzy root containment (e.g. 'log' in 'logarithm')
+    const hasMatch = studentSet.has(token) || Array.from(studentSet).some(st => 
+      (st.length >= 3 && token.length >= 3 && (st.includes(token) || token.includes(st)))
+    );
+    if (hasMatch) intersectionCount++;
   });
 
-  const unionCount = new Set([...studentTokens, ...modelTokens]).size;
-  const jaccard = unionCount > 0 ? intersectionCount / unionCount : 0;
+  const effectiveUnion = Math.max(1, studentSet.size + modelSet.size - intersectionCount);
+  const jaccard = Math.min(1, intersectionCount / effectiveUnion);
 
   // Cosine-like token frequency overlap
   const tfStudent: Record<string, number> = {};
   const tfModel: Record<string, number> = {};
-  studentTokens.forEach(t => { tfStudent[t] = (tfStudent[t] || 0) + 1; });
-  modelTokens.forEach(t => { tfModel[t] = (tfModel[t] || 0) + 1; });
+  studentStems.forEach(t => { tfStudent[t] = (tfStudent[t] || 0) + 1; });
+  modelStems.forEach(t => { tfModel[t] = (tfModel[t] || 0) + 1; });
 
   let dotProduct = 0;
   let magStudent = 0;
@@ -52,8 +79,16 @@ export function calculateSemanticSimilarity(studentText: string, modelText: stri
   Object.values(tfModel).forEach(v => { magModel += v * v; });
 
   Object.keys(tfModel).forEach(t => {
+    // Check direct or stem overlap
     if (tfStudent[t]) {
       dotProduct += tfModel[t] * tfStudent[t];
+    } else {
+      const fuzzyKey = Object.keys(tfStudent).find(st => 
+        st.length >= 3 && t.length >= 3 && (st.includes(t) || t.includes(st))
+      );
+      if (fuzzyKey) {
+        dotProduct += tfModel[t] * tfStudent[fuzzyKey] * 0.85;
+      }
     }
   });
 
@@ -61,8 +96,11 @@ export function calculateSemanticSimilarity(studentText: string, modelText: stri
     ? dotProduct / (Math.sqrt(magStudent) * Math.sqrt(magModel))
     : 0;
 
+  // Overlap ratio measures how many of the model's required concepts/words the student recalled
+  const recallRatio = modelSet.size > 0 ? intersectionCount / modelSet.size : 0;
+
   // Blended similarity score between 0 and 100
-  const score = Math.round((cosine * 0.65 + jaccard * 0.35) * 100);
+  const score = Math.round((cosine * 0.45 + jaccard * 0.25 + recallRatio * 0.30) * 100);
   return Math.min(99, Math.max(20, score));
 }
 

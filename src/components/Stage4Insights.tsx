@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { 
   BarChart3, 
   TrendingUp, 
+  TrendingDown,
   Sparkles, 
   CheckCircle, 
   AlertTriangle, 
@@ -12,13 +13,22 @@ import {
   Share2, 
   Award, 
   Target,
+  FileText,
   LineChart as LineChartIcon,
   ShieldCheck,
-  Check
+  Check,
+  ArrowUpRight,
+  ArrowDownRight,
+  Users,
+  Percent,
+  Activity,
+  Layers
 } from 'lucide-react';
 import { 
   BarChart, 
   Bar, 
+  Cell,
+  ReferenceLine,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -34,24 +44,131 @@ import {
   Area
 } from 'recharts';
 import { StudentSubmission, ExamPaper } from '../types';
+import { useTheme } from '../context/ThemeContext';
+import { exportStudentEvaluationPDF } from '../utils/pdfExport';
+import { showSweetToast } from '../utils/sweetAlert';
 
 interface Stage4Props {
   submission: StudentSubmission;
   exam: ExamPaper;
   onNextStage: () => void;
+  allSubmissions?: StudentSubmission[];
 }
 
 export const Stage4Insights: React.FC<Stage4Props> = ({
   submission,
   exam,
-  onNextStage
+  onNextStage,
+  allSubmissions = []
 }) => {
+  const { currentTheme } = useTheme();
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
+  const [comparisonViewMode, setComparisonViewMode] = useState<'marks' | 'percentage' | 'delta'>('marks');
+  const [showClassHighest, setShowClassHighest] = useState<boolean>(true);
+
+  const studentScoreColor = currentTheme.colors.accentPrimary || '#6366F1';
+  const classAvgColor = '#64748B';
+  const classHighColor = '#3F3F46';
 
   const insights = submission.personalizedInsights;
   const predictive = submission.predictiveAnalytics;
 
-  // Prepare Bar chart data
+  // Live total marks taking teacher overrides into account
+  const liveTotalMarks = Number(
+    submission.questionEvaluations.reduce((sum, e) => {
+      const val = e.teacherOverrideMarks !== undefined ? e.teacherOverrideMarks : e.awardedMarks;
+      return sum + val;
+    }, 0).toFixed(1)
+  );
+  const livePercentage = Number(((liveTotalMarks / (exam.totalMarks || 1)) * 100).toFixed(1));
+
+  // Find all class submissions for this specific exam
+  const examSubmissions = allSubmissions.filter(s => s.examId === exam.id);
+  const hasMultipleSubmissions = examSubmissions.length > 1;
+
+  // Question-by-question comparative metrics (Student vs Class Average)
+  const defaultCohortFactors = [0.72, 0.68, 0.74, 0.70, 0.71];
+
+  const questionComparisonData = exam.questions.map((q, idx) => {
+    const evalItem = submission.questionEvaluations.find(
+      e => e.questionId === q.id || e.questionNumber === q.questionNumber
+    );
+    const studentMarks = evalItem 
+      ? (evalItem.teacherOverrideMarks !== undefined ? evalItem.teacherOverrideMarks : evalItem.awardedMarks)
+      : 0;
+    const maxMarks = q.maxMarks || 10;
+    const studentPct = Number(((studentMarks / maxMarks) * 100).toFixed(1));
+
+    let classAvgMarks = 0;
+    let classHighMarks = maxMarks;
+
+    if (hasMultipleSubmissions) {
+      const marksSum = examSubmissions.reduce((sum, sub) => {
+        const qe = sub.questionEvaluations.find(
+          e => e.questionId === q.id || e.questionNumber === q.questionNumber
+        );
+        const m = qe ? (qe.teacherOverrideMarks !== undefined ? qe.teacherOverrideMarks : qe.awardedMarks) : 0;
+        return sum + m;
+      }, 0);
+      classAvgMarks = Number((marksSum / examSubmissions.length).toFixed(1));
+
+      classHighMarks = Math.max(...examSubmissions.map(sub => {
+        const qe = sub.questionEvaluations.find(
+          e => e.questionId === q.id || e.questionNumber === q.questionNumber
+        );
+        return qe ? (qe.teacherOverrideMarks !== undefined ? qe.teacherOverrideMarks : qe.awardedMarks) : 0;
+      }));
+    } else {
+      const factor = defaultCohortFactors[idx % defaultCohortFactors.length];
+      classAvgMarks = Number((maxMarks * factor).toFixed(1));
+      classHighMarks = Number((maxMarks * 0.95).toFixed(1));
+    }
+
+    const classAvgPct = Number(((classAvgMarks / maxMarks) * 100).toFixed(1));
+    const diffMarks = Number((studentMarks - classAvgMarks).toFixed(1));
+    const diffPct = Number((studentPct - classAvgPct).toFixed(1));
+
+    return {
+      questionNumber: q.questionNumber,
+      name: `Q${q.questionNumber}`,
+      topic: q.topic || `Question ${q.questionNumber}`,
+      shortTopic: q.topic ? (q.topic.length > 20 ? q.topic.slice(0, 18) + '...' : q.topic) : `Q${q.questionNumber}`,
+      studentMarks,
+      classAvgMarks,
+      classHighMarks,
+      maxMarks,
+      studentPct,
+      classAvgPct,
+      diffMarks,
+      diffPct,
+      similarity: evalItem?.semanticSimilarityScore || 0,
+      isAboveAverage: studentMarks >= classAvgMarks
+    };
+  });
+
+  // Overall Class Total Average Marks & Percentage
+  let classTotalAvgMarks = 0;
+  let classAvgPercentage = 0;
+
+  if (hasMultipleSubmissions) {
+    const sumTotal = examSubmissions.reduce((sum, s) => {
+      const sTotal = s.questionEvaluations.reduce((subSum, e) => {
+        const m = e.teacherOverrideMarks !== undefined ? e.teacherOverrideMarks : e.awardedMarks;
+        return subSum + m;
+      }, 0);
+      return sum + sTotal;
+    }, 0);
+    classTotalAvgMarks = Number((sumTotal / examSubmissions.length).toFixed(1));
+    classAvgPercentage = Number(((classTotalAvgMarks / (exam.totalMarks || 1)) * 100).toFixed(1));
+  } else {
+    classAvgPercentage = 71.5;
+    classTotalAvgMarks = Number(((exam.totalMarks * classAvgPercentage) / 100).toFixed(1));
+  }
+
+  const overallDeltaMarks = Number((liveTotalMarks - classTotalAvgMarks).toFixed(1));
+  const overallDeltaPct = Number((livePercentage - classAvgPercentage).toFixed(1));
+
+  // Prepare Bar chart data for secondary question score breakdown
   const questionScoreData = submission.questionEvaluations.map(e => ({
     name: `Q${e.questionNumber}`,
     awarded: e.teacherOverrideMarks !== undefined ? e.teacherOverrideMarks : e.awardedMarks,
@@ -74,10 +191,99 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
   const cohortDistribution = [
     { range: '0-30%', students: 2, isStudentRange: false },
     { range: '31-50%', students: 8, isStudentRange: false },
-    { range: '51-70%', students: 24, isStudentRange: submission.percentageScore >= 51 && submission.percentageScore <= 70 },
-    { range: '71-85%', students: 38, isStudentRange: submission.percentageScore > 70 && submission.percentageScore <= 85 },
-    { range: '86-100%', students: 16, isStudentRange: submission.percentageScore > 85 }
+    { range: '51-70%', students: 24, isStudentRange: livePercentage >= 51 && livePercentage <= 70 },
+    { range: '71-85%', students: 38, isStudentRange: livePercentage > 70 && livePercentage <= 85 },
+    { range: '86-100%', students: 16, isStudentRange: livePercentage > 85 }
   ];
+
+  // Custom tooltips for performance comparison
+  const CustomComparisonTooltip: React.FC<{
+    active?: boolean;
+    payload?: any[];
+    label?: string;
+  }> = ({ active, payload }) => {
+    if (!active || !payload || !payload.length) return null;
+    const data = payload[0]?.payload;
+    if (!data) return null;
+
+    return (
+      <div className="bg-[#18181b] border border-[#27272a] p-3 rounded-lg shadow-2xl text-xs space-y-2 min-w-[220px]">
+        <div className="border-b border-[#27272a] pb-1.5">
+          <div className="flex items-center justify-between text-white font-semibold">
+            <span>Q{data.questionNumber}: {data.name}</span>
+            <span className="text-[10px] text-slate-400 font-normal">Max: {data.maxMarks} marks</span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-0.5">{data.topic}</p>
+        </div>
+
+        <div className="space-y-1.5 text-[11px]">
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 font-medium" style={{ color: studentScoreColor }}>
+              <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: studentScoreColor }} />
+              Student Score:
+            </span>
+            <span className="font-bold text-white font-mono">
+              {data.studentMarks} / {data.maxMarks} ({data.studentPct}%)
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1.5 text-slate-300">
+              <span className="w-2.5 h-2.5 rounded-sm bg-[#64748B]" />
+              Class Average:
+            </span>
+            <span className="font-semibold text-slate-300 font-mono">
+              {data.classAvgMarks} / {data.maxMarks} ({data.classAvgPct}%)
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 border-t border-[#27272a]">
+            <span className="text-slate-400">Relative Delta:</span>
+            <span className={`font-bold font-mono ${data.diffMarks >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {data.diffMarks >= 0 ? `+${data.diffMarks}` : data.diffMarks} marks ({data.diffPct >= 0 ? `+${data.diffPct}` : data.diffPct}%)
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-slate-500">
+            <span>Class Top Score:</span>
+            <span className="font-mono text-slate-400">{data.classHighMarks} marks</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const CustomDeltaTooltip: React.FC<{
+    active?: boolean;
+    payload?: any[];
+  }> = ({ active, payload }) => {
+    if (!active || !payload || !payload.length) return null;
+    const data = payload[0]?.payload;
+    if (!data) return null;
+    const isPositive = data.diffMarks >= 0;
+
+    return (
+      <div className="bg-[#18181b] border border-[#27272a] p-3 rounded-lg shadow-2xl text-xs space-y-1.5 min-w-[200px]">
+        <p className="font-semibold text-white">Q{data.questionNumber}: {data.topic}</p>
+        <div className="text-[11px] space-y-1">
+          <div className="flex justify-between text-slate-400">
+            <span>Student Score:</span>
+            <span className="text-white font-mono">{data.studentMarks} pts</span>
+          </div>
+          <div className="flex justify-between text-slate-400">
+            <span>Class Mean:</span>
+            <span className="text-slate-300 font-mono">{data.classAvgMarks} pts</span>
+          </div>
+          <div className="flex justify-between font-bold border-t border-[#27272a] pt-1">
+            <span>Net Variance:</span>
+            <span className={`font-mono ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {isPositive ? `+${data.diffMarks}` : data.diffMarks} pts ({isPositive ? `+${data.diffPct}` : data.diffPct}%)
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const handleExportJSON = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(submission, null, 2));
@@ -109,6 +315,26 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
     setTimeout(() => setDownloadSuccess(null), 3000);
   };
 
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  const handleExportPDF = async () => {
+    try {
+      setIsExportingPdf(true);
+      await exportStudentEvaluationPDF(submission, exam, {
+        institutionName: 'DEPARTMENT OF COMPUTER SCIENCE & ENGINEERING',
+        evaluatorName: 'Prof. Rajesh Kulkarni (Senior Faculty Evaluator)'
+      });
+      showSweetToast(`Official PDF dossier exported for ${submission.studentName} (${submission.studentRollNumber})`, 'success');
+      setDownloadSuccess('Archival PDF Report Exported');
+      setTimeout(() => setDownloadSuccess(null), 4000);
+    } catch (error) {
+      console.error('Error exporting student PDF:', error);
+      showSweetToast('Failed to export PDF evaluation report. Please try again.', 'error');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   const handlePrintGradeCard = () => {
     window.print();
   };
@@ -133,6 +359,17 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              id="export-pdf-report-btn"
+              onClick={handleExportPDF}
+              disabled={isExportingPdf}
+              className="flex items-center space-x-1.5 px-3.5 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+              title="Export formatted PDF evaluation report for offline institutional archival"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>{isExportingPdf ? 'Generating PDF...' : 'Export Archival PDF'}</span>
+            </button>
+
             <button
               id="export-json-btn"
               onClick={handleExportJSON}
@@ -250,6 +487,287 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
         </div>
       </div>
 
+      {/* Visual Performance Comparison Chart: Student Score vs Class Average (Full Width) */}
+      <div className="bg-[#18181b] border border-[#27272a] rounded-xl p-5 shadow-sm space-y-5">
+        {/* Section Header */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-[#27272a] pb-4">
+          <div>
+            <div className="flex items-center space-x-2.5">
+              <span className="p-1.5 rounded-lg bg-blue-500/10 text-[#2563EB] border border-blue-500/20">
+                <BarChart3 className="w-4 h-4" />
+              </span>
+              <h3 className="text-sm font-semibold text-white tracking-tight">
+                Student Performance vs. Class Average
+              </h3>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-900/30 text-blue-300 border border-blue-800/40 font-semibold">
+                Cohort Benchmark
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">
+              Comparative analysis of <span className="text-white font-medium">{submission.studentName}</span>'s results against class cohort averages and curriculum benchmarks.
+            </p>
+          </div>
+
+          {/* Interactive Mode Tabs */}
+          <div className="flex items-center flex-wrap gap-1.5 bg-[#09090b] p-1 rounded-lg border border-[#27272a]">
+            <button
+              id="tab-view-marks"
+              onClick={() => setComparisonViewMode('marks')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+                comparisonViewMode === 'marks'
+                  ? 'bg-[#2563EB] text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-[#27272a]'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Marks Comparison</span>
+            </button>
+
+            <button
+              id="tab-view-percentage"
+              onClick={() => setComparisonViewMode('percentage')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+                comparisonViewMode === 'percentage'
+                  ? 'bg-[#2563EB] text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-[#27272a]'
+              }`}
+            >
+              <Percent className="w-3.5 h-3.5" />
+              <span>Mastery %</span>
+            </button>
+
+            <button
+              id="tab-view-delta"
+              onClick={() => setComparisonViewMode('delta')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+                comparisonViewMode === 'delta'
+                  ? 'bg-[#2563EB] text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white hover:bg-[#27272a]'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Variance Delta (+/-)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* High-Level Comparison KPI Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="p-3 bg-[#09090b] rounded-lg border border-[#27272a] space-y-1">
+            <span className="text-[10px] uppercase font-semibold text-slate-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: studentScoreColor }} />
+              Student Total Score
+            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xl font-bold text-white font-mono">{liveTotalMarks}</span>
+              <span className="text-xs text-slate-400">/ {exam.totalMarks}</span>
+              <span className="text-xs font-semibold font-mono ml-auto" style={{ color: studentScoreColor }}>
+                ({livePercentage}%)
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 truncate">{submission.studentName} ({submission.studentRollNumber})</p>
+          </div>
+
+          <div className="p-3 bg-[#09090b] rounded-lg border border-[#27272a] space-y-1">
+            <span className="text-[10px] uppercase font-semibold text-slate-400 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#64748B]" />
+              Class Cohort Average
+            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xl font-bold text-slate-200 font-mono">{classTotalAvgMarks}</span>
+              <span className="text-xs text-slate-400">/ {exam.totalMarks}</span>
+              <span className="text-xs font-semibold text-slate-300 font-mono ml-auto">
+                ({classAvgPercentage}%)
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 truncate">
+              {hasMultipleSubmissions ? `Calculated across ${examSubmissions.length} submissions` : 'Class cohort mean'}
+            </p>
+          </div>
+
+          <div className="p-3 bg-[#09090b] rounded-lg border border-[#27272a] space-y-1">
+            <span className="text-[10px] uppercase font-semibold text-slate-400 flex items-center gap-1">
+              {overallDeltaMarks >= 0 ? (
+                <ArrowUpRight className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <ArrowDownRight className="w-3.5 h-3.5 text-rose-400" />
+              )}
+              Relative Delta
+            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className={`text-xl font-bold font-mono ${overallDeltaMarks >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {overallDeltaMarks >= 0 ? `+${overallDeltaMarks}` : overallDeltaMarks}
+              </span>
+              <span className="text-xs text-slate-400">marks</span>
+              <span className={`text-xs font-semibold font-mono ml-auto px-1.5 py-0.5 rounded ${
+                overallDeltaPct >= 0 
+                  ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' 
+                  : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+              }`}>
+                {overallDeltaPct >= 0 ? `+${overallDeltaPct}%` : `${overallDeltaPct}%`}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-400">
+              {overallDeltaMarks >= 0 ? 'Outperforming Class Mean' : 'Requires Topic Remediation'}
+            </p>
+          </div>
+
+          <div className="p-3 bg-[#09090b] rounded-lg border border-[#27272a] space-y-1">
+            <span className="text-[10px] uppercase font-semibold text-slate-400 flex items-center gap-1.5">
+              <Award className="w-3.5 h-3.5 text-amber-400" />
+              Percentile Rank
+            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xl font-bold text-amber-300 font-mono">
+                Top {(100 - predictive.classPercentileRank).toFixed(0)}%
+              </span>
+              <span className="text-xs text-slate-400">({predictive.classPercentileRank}th)</span>
+            </div>
+            <p className="text-[10px] text-slate-400 truncate">
+              Readiness: <span className="text-emerald-400 font-medium">{predictive.examReadinessLevel}</span>
+            </p>
+          </div>
+        </div>
+
+        {/* The Main Recharts Visual Display */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+            <span>
+              {comparisonViewMode === 'marks' && 'Side-by-Side Question Marks: Individual Student Score vs Class Average'}
+              {comparisonViewMode === 'percentage' && 'Topic Mastery Attainment (%) with Class Cohort Benchmark Reference Lines'}
+              {comparisonViewMode === 'delta' && 'Point Variance: Positive (Green = Above Class Mean) vs Negative (Red = Below Class Mean)'}
+            </span>
+            {comparisonViewMode === 'marks' && (
+              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-300 hover:text-white select-none">
+                <input
+                  type="checkbox"
+                  checked={showClassHighest}
+                  onChange={(e) => setShowClassHighest(e.target.checked)}
+                  className="rounded bg-zinc-900 border-zinc-700 text-[#2563EB] focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                />
+                <span>Include Class Top Score</span>
+              </label>
+            )}
+          </div>
+
+          {/* Chart Container */}
+          <div className="h-72 w-full pt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              {comparisonViewMode === 'marks' ? (
+                <BarChart data={questionComparisonData} margin={{ top: 10, right: 15, left: -15, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" opacity={0.7} />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#94A3B8" 
+                    fontSize={11} 
+                    tickFormatter={(val, i) => `${val} (${questionComparisonData[i]?.shortTopic || ''})`} 
+                  />
+                  <YAxis stroke="#94A3B8" fontSize={11} domain={[0, Math.max(10, ...questionComparisonData.map(d => d.maxMarks))]} />
+                  <Tooltip content={<CustomComparisonTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                  <Bar dataKey="studentMarks" name="Student Score" fill={studentScoreColor} radius={[4, 4, 0, 0]} maxBarSize={42} />
+                  <Bar dataKey="classAvgMarks" name="Class Average" fill={classAvgColor} radius={[4, 4, 0, 0]} maxBarSize={42} />
+                  {showClassHighest && (
+                    <Bar dataKey="classHighMarks" name="Class Highest" fill={classHighColor} radius={[4, 4, 0, 0]} maxBarSize={42} />
+                  )}
+                </BarChart>
+              ) : comparisonViewMode === 'percentage' ? (
+                <BarChart data={questionComparisonData} margin={{ top: 10, right: 20, left: -15, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" opacity={0.7} />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#94A3B8" 
+                    fontSize={11}
+                    tickFormatter={(val, i) => `${val}: ${questionComparisonData[i]?.shortTopic || ''}`} 
+                  />
+                  <YAxis stroke="#94A3B8" fontSize={11} domain={[0, 100]} unit="%" />
+                  <Tooltip content={<CustomComparisonTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                  <ReferenceLine 
+                    y={classAvgPercentage} 
+                    stroke="#F59E0B" 
+                    strokeDasharray="4 4" 
+                    label={{ 
+                      value: `Class Mean: ${classAvgPercentage}%`, 
+                      position: 'top', 
+                      fill: '#F59E0B', 
+                      fontSize: 10 
+                    }} 
+                  />
+                  <ReferenceLine 
+                    y={livePercentage} 
+                    stroke={studentScoreColor} 
+                    strokeDasharray="2 2" 
+                    label={{ 
+                      value: `Student: ${livePercentage}%`, 
+                      position: 'insideTopRight', 
+                      fill: studentScoreColor, 
+                      fontSize: 10 
+                    }} 
+                  />
+                  <Bar dataKey="studentPct" name="Student Score %" fill={studentScoreColor} radius={[4, 4, 0, 0]} maxBarSize={42} />
+                  <Bar dataKey="classAvgPct" name="Class Average %" fill={classAvgColor} radius={[4, 4, 0, 0]} maxBarSize={42} />
+                </BarChart>
+              ) : (
+                <BarChart data={questionComparisonData} margin={{ top: 15, right: 15, left: -15, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" opacity={0.7} />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#94A3B8" 
+                    fontSize={11}
+                    tickFormatter={(val, i) => `${val}: ${questionComparisonData[i]?.shortTopic || ''}`} 
+                  />
+                  <YAxis stroke="#94A3B8" fontSize={11} unit=" pts" />
+                  <Tooltip content={<CustomDeltaTooltip />} />
+                  <ReferenceLine y={0} stroke="#94A3B8" strokeWidth={1.5} />
+                  <Bar dataKey="diffMarks" name="Score Variance vs Mean" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                    {questionComparisonData.map((entry, index) => (
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={entry.diffMarks >= 0 ? '#16A34A' : '#DC2626'} 
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              )}
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Detailed Question Comparison Breakdown Strip */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-2 border-t border-[#27272a]">
+          {questionComparisonData.map((item) => (
+            <div 
+              key={item.questionNumber} 
+              className="p-2.5 bg-[#09090b] rounded-lg border border-[#27272a] text-xs flex flex-col justify-between"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className="font-bold text-white">Q{item.questionNumber}:</span>
+                  <span className="text-slate-300 ml-1 truncate font-medium block text-[11px]">
+                    {item.topic}
+                  </span>
+                </div>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 ${
+                  item.diffMarks >= 0 
+                    ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' 
+                    : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+                }`}>
+                  {item.diffMarks >= 0 ? `+${item.diffMarks}` : item.diffMarks} pts
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 pt-1.5 border-t border-[#27272a]/60">
+                <span>Student: <strong className="text-white font-mono">{item.studentMarks}</strong>/{item.maxMarks}</span>
+                <span>Class Avg: <strong className="text-slate-300 font-mono">{item.classAvgMarks}</strong></span>
+                <span className={item.diffPct >= 0 ? 'text-emerald-400 font-medium' : 'text-rose-400 font-medium'}>
+                  {item.diffPct >= 0 ? `+${item.diffPct}%` : `${item.diffPct}%`}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Interactive Visualizations Row */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
@@ -257,7 +775,7 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
         <div className="lg:col-span-6 bg-[#18181b] border border-[#27272a] rounded-xl p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-[#27272a] pb-3">
             <div className="flex items-center space-x-2">
-              <BarChart3 className="w-4 h-4 text-indigo-400" />
+              <BarChart3 className="w-4 h-4 text-blue-400" />
               <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-200">
                 Question Marks vs Max Possible
               </h3>
@@ -276,8 +794,8 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
                   itemStyle={{ color: '#fafafa' }}
                 />
                 <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                <Bar dataKey="awarded" name="Awarded Score" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="max" name="Max Marks" fill="#27272a" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="awarded" name="Awarded Score" fill="#2563EB" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="max" name="Max Marks" fill="#334155" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -287,7 +805,7 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
         <div className="lg:col-span-6 bg-[#18181b] border border-[#27272a] rounded-xl p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-[#27272a] pb-3">
             <div className="flex items-center space-x-2">
-              <Compass className="w-4 h-4 text-indigo-400" />
+              <Compass className="w-4 h-4 text-blue-400" />
               <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-200">
                 Cognitive & Examination Skill Matrix
               </h3>
@@ -301,8 +819,8 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
                 <PolarGrid stroke="#27272a" />
                 <PolarAngleAxis dataKey="skill" stroke="#a1a1aa" fontSize={10} />
                 <PolarRadiusAxis stroke="#52525b" angle={30} domain={[0, 100]} fontSize={9} />
-                <Radar name="Student Score" dataKey="studentScore" stroke="#6366f1" fill="#6366f1" fillOpacity={0.35} />
-                <Radar name="Cohort Average" dataKey="cohortAverage" stroke="#71717a" fill="#71717a" fillOpacity={0.2} />
+                <Radar name="Student Score" dataKey="studentScore" stroke="#2563EB" fill="#2563EB" fillOpacity={0.35} />
+                <Radar name="Cohort Average" dataKey="cohortAverage" stroke="#64748B" fill="#64748B" fillOpacity={0.2} />
                 <Legend wrapperStyle={{ fontSize: '11px' }} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px', fontSize: '11px', color: '#fafafa' }}
@@ -419,9 +937,14 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
 
             {/* Class Cohort Bell Curve */}
             <div className="pt-2 border-t border-[#27272a] space-y-2">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-                Class Cohort Grade Distribution:
-              </span>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+                  Class Cohort Grade Distribution:
+                </span>
+                <span className="text-[10px] text-blue-300 font-mono font-medium">
+                  Current Student: {livePercentage}% (Top {(100 - predictive.classPercentileRank).toFixed(0)}%)
+                </span>
+              </div>
               <div className="h-32 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={cohortDistribution} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
@@ -431,7 +954,7 @@ export const Stage4Insights: React.FC<Stage4Props> = ({
                     <Tooltip
                       contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', borderRadius: '8px', fontSize: '10px', color: '#fafafa' }}
                     />
-                    <Area type="monotone" dataKey="students" stroke="#6366f1" fill="#6366f1" fillOpacity={0.25} />
+                    <Area type="monotone" dataKey="students" stroke="#2563EB" fill="#2563EB" fillOpacity={0.25} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

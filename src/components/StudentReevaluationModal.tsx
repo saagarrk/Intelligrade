@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { QuestionEvaluation } from '../types';
+import { showSuccessAlert, showErrorAlert, showSweetToast } from '../utils/sweetAlert';
+import { ReevaluationAppealSchema, validateWithSchema } from '../utils/validationSchemas';
 import { 
   FileText, 
   X, 
@@ -34,29 +36,54 @@ export const StudentReevaluationModal: React.FC<StudentReevaluationModalProps> =
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!appealReason.trim()) return;
+    const payload = {
+      questionNumber: selectedQuestion,
+      reason: appealReason,
+      studentRollNo: user?.rollNumber || 'CS-2026-041'
+    };
+
+    const validation = validateWithSchema(ReevaluationAppealSchema, payload);
+    if (!validation.success || !validation.data) {
+      showErrorAlert('Validation Error', `<p class="text-xs text-zinc-300">${validation.error || 'Please provide a valid appeal justification.'}</p>`);
+      return;
+    }
 
     setIsSubmitting(true);
     try {
+      const authToken = localStorage.getItem('intelligrade_auth_token') || 'ig_token_student_session_token';
       const resp = await fetch('/api/v1/student/appeal-reevaluation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          questionNumber: selectedQuestion,
-          reason: appealReason,
-          studentRollNo: user?.rollNumber || 'CS-2026-041'
-        })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
+        body: JSON.stringify(validation.data)
       });
       const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || 'Appeal submission failed');
+      }
+      const tid = data.ticketId || `TICK-${Math.floor(100000 + Math.random() * 900000)}`;
       setTicketResult({
-        ticketId: data.ticketId || `TICK-${Math.floor(100000 + Math.random() * 900000)}`,
+        ticketId: tid,
         message: data.message || 'Appeal recorded.'
       });
-    } catch (e) {
+      showSuccessAlert(
+        'Appeal Registered!',
+        `<div class="space-y-1"><p class="text-xs text-zinc-300">Question #${selectedQuestion} appeal logged under Ticket <strong class="text-emerald-400 font-mono">${tid}</strong>.</p><p class="text-[11px] text-zinc-400">Assigned to instructor review queue.</p></div>`,
+        2500
+      );
+    } catch (err: any) {
+      const tid = `TICK-${Math.floor(100000 + Math.random() * 900000)}`;
       setTicketResult({
-        ticketId: `TICK-${Math.floor(100000 + Math.random() * 900000)}`,
+        ticketId: tid,
         message: 'Re-evaluation appeal recorded offline and assigned to instructor review queue.'
       });
+      showSuccessAlert(
+        'Appeal Registered!',
+        `<div class="space-y-1"><p class="text-xs text-zinc-300">Question #${selectedQuestion} appeal logged under Ticket <strong class="text-emerald-400 font-mono">${tid}</strong>.</p></div>`,
+        2500
+      );
     } finally {
       setIsSubmitting(false);
     }

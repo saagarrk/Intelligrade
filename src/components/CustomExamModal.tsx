@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Plus, Trash2, Sparkles, BookOpen, Check } from 'lucide-react';
 import { ExamPaper, QuestionItem } from '../types';
+import { showSuccessAlert, showSweetToast } from '../utils/sweetAlert';
 
 interface CustomExamModalProps {
   isOpen: boolean;
@@ -83,6 +84,11 @@ export const CustomExamModal: React.FC<CustomExamModalProps> = ({
     };
 
     onSaveExam(newExam);
+    showSuccessAlert(
+      'Exam Rubric Created!',
+      `<p class="text-xs text-zinc-300">Successfully configured <strong>"${title}"</strong> (${totalMarks} Total Marks, ${questions.length} questions).</p>`,
+      2000
+    );
     onClose();
   };
 

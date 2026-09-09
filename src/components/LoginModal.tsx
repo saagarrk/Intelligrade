@@ -1,18 +1,27 @@
 import React, { useState } from 'react';
+import { UserRole, RegisterData } from '../types';
+import { useAuth } from '../context/AuthContext';
+import { validateLegalName } from '../utils/nameValidation';
 import { 
-  UserRole 
-} from '../types';
-import { useAuth, DEMO_USERS } from '../context/AuthContext';
+  showSuccessAlert, 
+  showErrorAlert, 
+  showRoleMismatchAlert, 
+  showSweetToast, 
+  showWarningAlert 
+} from '../utils/sweetAlert';
 import { 
   ShieldCheck, 
+  Shield,
   GraduationCap, 
   BookOpen, 
-  UserCheck, 
+  User as UserIcon, 
   Lock, 
   Mail, 
-  ArrowRight, 
   X, 
-  CheckCircle,
+  ArrowRight, 
+  Eye, 
+  EyeOff, 
+  CheckCircle, 
   AlertCircle,
   Key
 } from 'lucide-react';
@@ -20,56 +29,129 @@ import {
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  targetRole?: UserRole;
+  onOpenAuthPage?: () => void;
 }
 
-export const LoginModal: React.FC<LoginModalProps> = ({
-  isOpen,
-  onClose,
-  targetRole
-}) => {
-  const { login, user, role: currentRole, isLoading } = useAuth();
-  
-  const [activeTab, setActiveTab] = useState<'quick' | 'custom'>('quick');
-  const [selectedRole, setSelectedRole] = useState<UserRole>(targetRole || 'teacher');
+export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onOpenAuthPage }) => {
+  const { user, login, register, logout, isLoading } = useAuth();
+  const currentRole = user?.role;
+
+  const [activeTab, setActiveTab] = useState<'signin' | 'register'>('signin');
+  const [selectedRole, setSelectedRole] = useState<UserRole>(currentRole || 'student');
+
+  // Custom Sign In States
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+
+  // Register States
+  const [regName, setRegName] = useState<string>('');
+  const [regEmail, setRegEmail] = useState<string>('');
+  const [regPassword, setRegPassword] = useState<string>('');
+  const [regRole, setRegRole] = useState<UserRole>('student');
+  const [regDepartment, setRegDepartment] = useState<string>('Computer Science & Engineering');
+  const [regRollNumber, setRegRollNumber] = useState<string>('');
+  const [regAdminKey, setRegAdminKey] = useState<string>('');
+  const [regTeacherKey, setRegTeacherKey] = useState<string>('');
+
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleQuickLogin = async (role: UserRole) => {
-    setErrorMsg(null);
-    const demo = DEMO_USERS[role];
-    const res = await login(demo.email, role === 'student' ? 'student123' : role === 'teacher' ? 'teacher123' : 'admin123', role);
-    if (res.success) {
-      setSuccessMsg(`Authenticated successfully as ${demo.name} (${role.toUpperCase()})`);
-      setTimeout(() => {
-        setSuccessMsg(null);
-        onClose();
-      }, 900);
-    } else {
-      setErrorMsg(res.error || 'Authentication failed');
-    }
-  };
-
-  const handleCustomLogin = async (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setErrorMsg('Please provide both email and password.');
+    if (!email.trim() || !password) {
+      setErrorMsg('Please enter your email and password.');
+      showWarningAlert('Missing Credentials', 'Please enter your email and password.');
       return;
     }
     setErrorMsg(null);
-    const res = await login(email, password);
+    const res = await login(email.trim(), password, selectedRole);
     if (res.success) {
-      setSuccessMsg('Authentication successful!');
+      setSuccessMsg(`Authentication successful!`);
+      showSweetToast(`Welcome! Signed in as ${selectedRole.toUpperCase()}`, 'success');
+      setTimeout(() => {
+        setSuccessMsg(null);
+        onClose();
+      }, 700);
+    } else {
+      const err = res.error || 'Invalid credentials.';
+      setErrorMsg(err);
+      if (err.includes('Access Denied')) {
+        const accountRole = err.includes('Student') ? 'student' : err.includes('Faculty') || err.includes('Teacher') ? 'teacher' : 'admin';
+        showRoleMismatchAlert(accountRole, selectedRole, () => {
+          setSelectedRole(accountRole as UserRole);
+          setErrorMsg(null);
+          showSweetToast(`Switched to ${accountRole.toUpperCase()} portal`, 'info');
+        });
+      } else {
+        showErrorAlert('Sign In Failed', `<p class="text-xs text-zinc-300">${err}</p>`);
+      }
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regName.trim() || !regEmail.trim() || !regPassword) {
+      setErrorMsg('Please fill in all required fields.');
+      showWarningAlert('Incomplete Form', 'Please fill in all required fields.');
+      return;
+    }
+
+    const nameCheck = validateLegalName(regName);
+    if (!nameCheck.isValid) {
+      setErrorMsg(nameCheck.error || 'Invalid Full Legal Name.');
+      showErrorAlert('Invalid Full Legal Name', `<div class="space-y-1"><p class="text-xs text-zinc-300">${nameCheck.error}</p><p class="text-[11px] text-amber-400">Institutional records require a valid legal name without numbers or special symbols.</p></div>`);
+      return;
+    }
+
+    if (regPassword.length < 6) {
+      setErrorMsg('Password must be at least 6 characters.');
+      showWarningAlert('Password Too Short', 'Password must be at least 6 characters.');
+      return;
+    }
+
+    const VALID_ADMIN_KEYS = ['ADMIN-SEC-2026', 'ADMIN-2026-KEY', 'admin123'];
+    const VALID_TEACHER_KEYS = ['TEACHER-SEC-2026', 'FACULTY-2026-KEY', 'teacher123'];
+
+    if (regRole === 'admin' && (!regAdminKey || !VALID_ADMIN_KEYS.includes(regAdminKey.trim()))) {
+      setErrorMsg('Invalid Administrator Security Master Key.');
+      showErrorAlert('Invalid Admin Key', 'Please provide a valid Administrator Security Key. Authorization required.');
+      return;
+    }
+
+    if (regRole === 'teacher' && (!regTeacherKey || !VALID_TEACHER_KEYS.includes(regTeacherKey.trim()))) {
+      setErrorMsg('Invalid Faculty Authorization Secret Key.');
+      showErrorAlert('Invalid Teacher Key', 'Please provide a valid Faculty Authorization Secret Key. Only verified teachers possess this key.');
+      return;
+    }
+
+    setErrorMsg(null);
+    const payload: RegisterData = {
+      name: regName.trim(),
+      email: regEmail.trim(),
+      password: regPassword,
+      role: regRole,
+      department: regDepartment,
+      rollNumber: regRole === 'student' ? (regRollNumber || `CS-2026-${Math.floor(100 + Math.random() * 900)}`) : undefined,
+      title: regRole === 'teacher' ? 'Faculty Instructor' : regRole === 'admin' ? 'System Administrator' : undefined,
+      adminKey: regRole === 'admin' ? regAdminKey.trim() : undefined,
+      teacherKey: regRole === 'teacher' ? regTeacherKey.trim() : undefined
+    };
+
+    const res = await register(payload);
+    if (res.success) {
+      setSuccessMsg(`Registered successfully as ${regName} (${regRole.toUpperCase()})!`);
+      showSuccessAlert('Account Created', `<p class="text-xs text-zinc-300">Successfully registered as <strong>${regName}</strong> (${regRole.toUpperCase()}).</p>`, 1500);
       setTimeout(() => {
         setSuccessMsg(null);
         onClose();
       }, 900);
     } else {
-      setErrorMsg(res.error || 'Invalid email or password.');
+      const err = res.error || 'Registration failed.';
+      setErrorMsg(err);
+      showErrorAlert('Registration Error', `<p class="text-xs text-zinc-300">${err}</p>`);
     }
   };
 
@@ -92,10 +174,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           </div>
           <div>
             <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              Authentication & Role Authorization
+              Institutional Authentication
             </h2>
             <p className="text-xs text-zinc-400">
-              Select one of the 3 pre-configured role profiles or enter credentials.
+              Sign in with your verified credentials or create a new academic account.
             </p>
           </div>
         </div>
@@ -117,165 +199,90 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         {/* Mode Selector Tabs */}
         <div className="flex border-b border-zinc-800 mb-6">
           <button
-            id="tab-quick-role-select"
-            onClick={() => setActiveTab('quick')}
+            id="tab-signin-modal"
+            onClick={() => setActiveTab('signin')}
             className={`flex-1 py-2.5 text-xs font-semibold text-center border-b-2 transition ${
-              activeTab === 'quick'
+              activeTab === 'signin'
                 ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            1-Click 3-Role Demo Login
+            Sign In
           </button>
           <button
-            id="tab-custom-creds"
-            onClick={() => setActiveTab('custom')}
+            id="tab-register-modal"
+            onClick={() => setActiveTab('register')}
             className={`flex-1 py-2.5 text-xs font-semibold text-center border-b-2 transition ${
-              activeTab === 'custom'
+              activeTab === 'register'
                 ? 'border-indigo-500 text-indigo-400 bg-indigo-500/5'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Custom Credentials
+            Create Account
           </button>
         </div>
 
-        {activeTab === 'quick' ? (
-          <div className="space-y-3">
-            {/* 1. STUDENT LOGIN CARD */}
-            <div 
-              onClick={() => handleQuickLogin('student')}
-              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between group ${
-                currentRole === 'student'
-                  ? 'bg-emerald-950/20 border-emerald-500/60 ring-1 ring-emerald-500/30'
-                  : 'bg-zinc-800/40 border-zinc-800 hover:border-emerald-500/40 hover:bg-zinc-800/80'
-              }`}
-            >
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                  <GraduationCap className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-100">{DEMO_USERS.student.name}</span>
-                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      Student
-                    </span>
-                    {currentRole === 'student' && (
-                      <span className="text-[10px] text-zinc-400 font-normal">(Active)</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-zinc-400 mt-0.5">{DEMO_USERS.student.email} • Roll: {DEMO_USERS.student.rollNumber}</p>
-                  <p className="text-[11px] text-emerald-400/80 mt-1">
-                    Permissions: View Graded Papers, OCR Breakdown, Radar Skills, Appeal Remarking
-                  </p>
-                </div>
+        {activeTab === 'signin' ? (
+          <form onSubmit={handleSignIn} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                Target Role Portal
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedRole('student')}
+                  className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-1.5 transition ${
+                    selectedRole === 'student'
+                      ? 'bg-emerald-950/60 border-emerald-500/80 text-emerald-300 ring-1 ring-emerald-500/30'
+                      : 'bg-zinc-800/60 border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <GraduationCap className="w-3.5 h-3.5" />
+                  <span>Student</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRole('teacher')}
+                  className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-1.5 transition ${
+                    selectedRole === 'teacher'
+                      ? 'bg-indigo-950/60 border-indigo-500/80 text-indigo-300 ring-1 ring-indigo-500/30'
+                      : 'bg-zinc-800/60 border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>Teacher</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRole('admin')}
+                  className={`py-2 px-3 rounded-lg text-xs font-medium border flex items-center justify-center gap-1.5 transition ${
+                    selectedRole === 'admin'
+                      ? 'bg-amber-950/60 border-amber-500/80 text-amber-300 ring-1 ring-amber-500/30'
+                      : 'bg-zinc-800/60 border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>Admin</span>
+                </button>
               </div>
-              <button 
-                id="btn-login-student-role"
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1 opacity-90 group-hover:opacity-100 transition shadow-sm"
-              >
-                <span>Login</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
             </div>
 
-            {/* 2. TEACHER LOGIN CARD */}
-            <div 
-              onClick={() => handleQuickLogin('teacher')}
-              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between group ${
-                currentRole === 'teacher'
-                  ? 'bg-indigo-950/20 border-indigo-500/60 ring-1 ring-indigo-500/30'
-                  : 'bg-zinc-800/40 border-zinc-800 hover:border-indigo-500/40 hover:bg-zinc-800/80'
-              }`}
-            >
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-full bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                  <BookOpen className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-100">{DEMO_USERS.teacher.name}</span>
-                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                      Teacher
-                    </span>
-                    {currentRole === 'teacher' && (
-                      <span className="text-[10px] text-zinc-400 font-normal">(Active)</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-zinc-400 mt-0.5">{DEMO_USERS.teacher.email} • {DEMO_USERS.teacher.title}</p>
-                  <p className="text-[11px] text-indigo-400/80 mt-1">
-                    Permissions: Preprocessing Engine, OCR Edit, AI Grading, Mark Overrides, Batch Mode
-                  </p>
-                </div>
-              </div>
-              <button 
-                id="btn-login-teacher-role"
-                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1 opacity-90 group-hover:opacity-100 transition shadow-sm"
-              >
-                <span>Login</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* 3. ADMIN LOGIN CARD */}
-            <div 
-              onClick={() => handleQuickLogin('admin')}
-              className={`p-4 rounded-xl border cursor-pointer transition flex items-center justify-between group ${
-                currentRole === 'admin'
-                  ? 'bg-amber-950/20 border-amber-500/60 ring-1 ring-amber-500/30'
-                  : 'bg-zinc-800/40 border-zinc-800 hover:border-amber-500/40 hover:bg-zinc-800/80'
-              }`}
-            >
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-100">{DEMO_USERS.admin.name}</span>
-                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                      Admin
-                    </span>
-                    {currentRole === 'admin' && (
-                      <span className="text-[10px] text-zinc-400 font-normal">(Active)</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-zinc-400 mt-0.5">{DEMO_USERS.admin.email} • {DEMO_USERS.admin.title}</p>
-                  <p className="text-[11px] text-amber-400/80 mt-1">
-                    Permissions: Full Root Access, User & Role Management, Audit Logs, Spring Boot Admin
-                  </p>
-                </div>
-              </div>
-              <button 
-                id="btn-login-admin-role"
-                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold flex items-center gap-1 opacity-90 group-hover:opacity-100 transition shadow-sm"
-              >
-                <span>Login</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        ) : (
-          <form onSubmit={handleCustomLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-zinc-300 mb-1.5">
                 Email Address
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-zinc-400 absolute left-3 top-3" />
+                <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
-                  id="input-login-email"
                   type="email"
+                  required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. teacher@intelligrade.edu"
+                  placeholder={`e.g. yourname@university.edu`}
                   className="w-full bg-zinc-800/80 border border-zinc-700 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500"
                 />
               </div>
-              <p className="text-[11px] text-zinc-500 mt-1">
-                Demo emails: student@intelligrade.edu, teacher@intelligrade.edu, admin@intelligrade.edu
-              </p>
             </div>
 
             <div>
@@ -283,49 +290,233 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 Password
               </label>
               <div className="relative">
-                <Key className="w-4 h-4 text-zinc-400 absolute left-3 top-3" />
+                <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
-                  id="input-login-password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  className="w-full bg-zinc-800/80 border border-zinc-700 rounded-lg pl-9 pr-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  placeholder="••••••••••••"
+                  className="w-full bg-zinc-800/80 border border-zinc-700 rounded-lg pl-9 pr-10 py-2 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-200"
+                >
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
               </div>
-              <p className="text-[11px] text-zinc-500 mt-1">
-                Demo passwords: student123, teacher123, admin123
-              </p>
             </div>
 
             <div className="pt-2 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition"
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:bg-zinc-800 transition"
               >
                 Cancel
               </button>
               <button
-                id="btn-submit-custom-login"
                 type="submit"
                 disabled={isLoading}
-                className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition flex items-center gap-1.5"
+                className="px-5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center gap-1.5 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
               >
-                {isLoading ? 'Verifying...' : 'Sign In'}
+                <span>Sign In as {selectedRole.toUpperCase()}</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form onSubmit={handleRegister} className="space-y-3.5">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                {(() => {
+                  const nameStatus = regName.trim() ? validateLegalName(regName) : null;
+                  const hasNumbers = /\d/.test(regName);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-medium text-zinc-300">Full Legal Name</label>
+                        {nameStatus && (
+                          <span className={`text-[10px] font-medium ${!nameStatus.isValid ? 'text-rose-400' : 'text-emerald-400'}`}>
+                            {!nameStatus.isValid ? (hasNumbers ? 'No digits' : 'Letters only') : 'Valid'}
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <UserIcon className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          required
+                          value={regName}
+                          onChange={(e) => setRegName(e.target.value)}
+                          placeholder="e.g. Jordan Hayes"
+                          className={`w-full bg-zinc-800/80 border rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-100 focus:outline-none transition ${
+                            nameStatus && !nameStatus.isValid
+                              ? 'border-rose-500/80 focus:border-rose-500 text-rose-200'
+                              : 'border-zinc-700 focus:border-indigo-500'
+                          }`}
+                        />
+                      </div>
+                      {nameStatus && !nameStatus.isValid && (
+                        <p className="text-[10px] text-rose-400 mt-1 flex items-start gap-1 font-medium">
+                          <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                          <span>{nameStatus.error}</span>
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">Email</label>
+                <div className="relative">
+                  <Mail className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    required
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    placeholder="user@university.edu"
+                    className="w-full bg-zinc-800/80 border border-zinc-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-300 mb-1">Role Designation</label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRegRole('student')}
+                  className={`py-1.5 text-xs font-medium rounded-lg border text-center transition ${
+                    regRole === 'student' ? 'bg-emerald-950/60 border-emerald-500 text-emerald-300' : 'bg-zinc-800/50 border-zinc-700 text-zinc-400'
+                  }`}
+                >
+                  Student
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRegRole('teacher')}
+                  className={`py-1.5 text-xs font-medium rounded-lg border text-center transition ${
+                    regRole === 'teacher' ? 'bg-indigo-950/60 border-indigo-500 text-indigo-300' : 'bg-zinc-800/50 border-zinc-700 text-zinc-400'
+                  }`}
+                >
+                  Faculty
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRegRole('admin')}
+                  className={`py-1.5 text-xs font-medium rounded-lg border text-center transition ${
+                    regRole === 'admin' ? 'bg-amber-950/60 border-amber-500 text-amber-300' : 'bg-zinc-800/50 border-zinc-700 text-zinc-400'
+                  }`}
+                >
+                  Admin
+                </button>
+              </div>
+            </div>
+
+            {regRole === 'student' && (
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">Student Roll Number</label>
+                <input
+                  type="text"
+                  value={regRollNumber}
+                  onChange={(e) => setRegRollNumber(e.target.value)}
+                  placeholder="e.g. CS-2026-042"
+                  className="w-full bg-zinc-800/80 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            )}
+
+            {regRole === 'teacher' && (
+              <div>
+                <label className="block text-xs font-medium text-indigo-300 mb-1">Faculty Authorization Secret Key</label>
+                <div className="relative">
+                  <Key className="w-3.5 h-3.5 text-indigo-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    required
+                    value={regTeacherKey}
+                    onChange={(e) => setRegTeacherKey(e.target.value)}
+                    placeholder="Enter confidential faculty key"
+                    className="w-full bg-zinc-800/80 border border-indigo-500/40 rounded-lg pl-8 pr-3 py-1.5 text-xs text-indigo-100 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <p className="text-[10px] text-zinc-400 mt-1">Confidential key issued only to verified faculty.</p>
+              </div>
+            )}
+
+            {regRole === 'admin' && (
+              <div>
+                <label className="block text-xs font-medium text-amber-300 mb-1">Administrator Master Key</label>
+                <div className="relative">
+                  <Key className="w-3.5 h-3.5 text-amber-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="password"
+                    required
+                    value={regAdminKey}
+                    onChange={(e) => setRegAdminKey(e.target.value)}
+                    placeholder="Enter Master Key"
+                    className="w-full bg-zinc-800/80 border border-amber-500/40 rounded-lg pl-8 pr-3 py-1.5 text-xs text-amber-100 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <p className="text-[10px] text-zinc-400 mt-1">Confidential security clearance key for system admins.</p>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-300 mb-1">Password</label>
+              <div className="relative">
+                <Lock className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  required
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="w-full bg-zinc-800/80 border border-zinc-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-zinc-400 hover:bg-zinc-800 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="px-5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+              >
+                <span>Register Account</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </form>
         )}
 
-        {/* Footer info */}
-        <div className="mt-6 pt-4 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-500">
-          <span className="flex items-center gap-1">
-            <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-            RBAC Authorization Active
-          </span>
-          <span>IntelliGrade v1.0.0</span>
-        </div>
+        {/* Link to Full Auth Page */}
+        {onOpenAuthPage && (
+          <div className="mt-4 pt-3 border-t border-zinc-800 text-center">
+            <button
+              onClick={() => {
+                onClose();
+                onOpenAuthPage();
+              }}
+              className="text-xs text-indigo-400 hover:text-indigo-300 transition inline-flex items-center gap-1 font-medium"
+            >
+              <span>Open Full Academic Portal Page</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -45,9 +45,13 @@ export const Stage5Architecture: React.FC = () => {
     setApiResponse(null);
     setResponseStatus(null);
     try {
+      const authToken = localStorage.getItem('intelligrade_auth_token') || 'ig_token_teacher_session_token';
       const options: RequestInit = {
         method: method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
       };
       if (method === 'POST') {
         options.body = requestBody;

@@ -17,6 +17,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { ExamPaper } from '../types';
+import { showSuccessAlert, showSweetToast } from '../utils/sweetAlert';
 
 interface BatchGradingModalProps {
   isOpen: boolean;
@@ -43,14 +44,14 @@ export const BatchGradingModal: React.FC<BatchGradingModalProps> = ({
   exam
 }) => {
   const initialStudents: BatchStudent[] = [
-    { id: '1', name: 'Alex Rivera', rollNo: 'CS-2026-041', fileType: 'pdf', fileName: 'Alex_Rivera_CS301_Midterm.pdf', fileSize: '482 KB', status: 'Completed', score: Number((exam.totalMarks * 0.91).toFixed(1)), maxMarks: exam.totalMarks, percentage: 91.0 },
-    { id: '2', name: 'Priya Sharma', rollNo: 'CS-2026-088', fileType: 'image', fileName: 'Priya_Sharma_Scan_p1.jpg', fileSize: '1.2 MB', status: 'Completed', score: Number((exam.totalMarks * 0.65).toFixed(1)), maxMarks: exam.totalMarks, percentage: 65.0 },
-    { id: '3', name: 'Marcus Chen', rollNo: 'CS-2026-012', fileType: 'pdf', fileName: 'Marcus_Chen_Answers.pdf', fileSize: '650 KB', status: 'Pending', maxMarks: exam.totalMarks },
-    { id: '4', name: 'Sophia Tanaka', rollNo: 'CS-2026-033', fileType: 'image', fileName: 'Sophia_Tanaka_CameraScan.png', fileSize: '2.1 MB', status: 'Pending', maxMarks: exam.totalMarks },
-    { id: '5', name: 'David Kim', rollNo: 'CS-2026-059', fileType: 'pdf', fileName: 'David_Kim_Script.pdf', fileSize: '390 KB', status: 'Pending', maxMarks: exam.totalMarks },
-    { id: '6', name: 'Elena Rostova', rollNo: 'CS-2026-074', fileType: 'image', fileName: 'Elena_Rostova_Paper.webp', fileSize: '820 KB', status: 'Pending', maxMarks: exam.totalMarks },
-    { id: '7', name: 'Tariq Al-Mansoor', rollNo: 'CS-2026-092', fileType: 'pdf', fileName: 'Tariq_Mansoor_Answers.pdf', fileSize: '520 KB', status: 'Pending', maxMarks: exam.totalMarks },
-    { id: '8', name: 'Zoe Washington', rollNo: 'CS-2026-105', fileType: 'image', fileName: 'Zoe_W_ExamSheet.jpeg', fileSize: '1.5 MB', status: 'Pending', maxMarks: exam.totalMarks },
+    { id: '1', name: 'Aarav Sharma', rollNo: 'CS-2026-041', fileType: 'pdf', fileName: 'Aarav_Sharma_CS301_Midterm.pdf', fileSize: '482 KB', status: 'Completed', score: Number((exam.totalMarks * 0.91).toFixed(1)), maxMarks: exam.totalMarks, percentage: 91.0 },
+    { id: '2', name: 'Priya Patel', rollNo: 'CS-2026-088', fileType: 'image', fileName: 'Priya_Patel_Scan_p1.jpg', fileSize: '1.2 MB', status: 'Completed', score: Number((exam.totalMarks * 0.65).toFixed(1)), maxMarks: exam.totalMarks, percentage: 65.0 },
+    { id: '3', name: 'Rohan Verma', rollNo: 'CS-2026-012', fileType: 'pdf', fileName: 'Rohan_Verma_Answers.pdf', fileSize: '650 KB', status: 'Pending', maxMarks: exam.totalMarks },
+    { id: '4', name: 'Ananya Iyer', rollNo: 'CS-2026-033', fileType: 'image', fileName: 'Ananya_Iyer_CameraScan.png', fileSize: '2.1 MB', status: 'Pending', maxMarks: exam.totalMarks },
+    { id: '5', name: 'Aditya Deshmukh', rollNo: 'CS-2026-059', fileType: 'pdf', fileName: 'Aditya_Deshmukh_Script.pdf', fileSize: '390 KB', status: 'Pending', maxMarks: exam.totalMarks },
+    { id: '6', name: 'Kavya Kulkarni', rollNo: 'CS-2026-074', fileType: 'image', fileName: 'Kavya_Kulkarni_Paper.webp', fileSize: '820 KB', status: 'Pending', maxMarks: exam.totalMarks },
+    { id: '7', name: 'Siddharth Nair', rollNo: 'CS-2026-092', fileType: 'pdf', fileName: 'Siddharth_Nair_Answers.pdf', fileSize: '520 KB', status: 'Pending', maxMarks: exam.totalMarks },
+    { id: '8', name: 'Sneha Joshi', rollNo: 'CS-2026-105', fileType: 'image', fileName: 'Sneha_Joshi_ExamSheet.jpeg', fileSize: '1.5 MB', status: 'Pending', maxMarks: exam.totalMarks },
   ];
 
   const [students, setStudents] = useState<BatchStudent[]>(initialStudents);
@@ -117,6 +118,7 @@ export const BatchGradingModal: React.FC<BatchGradingModalProps> = ({
 
   const handleStartBatch = () => {
     setIsRunning(true);
+    showSweetToast('Batch pipeline initialized. Grading submissions...', 'info');
     let currentIdx = students.findIndex(s => s.status === 'Pending');
     if (currentIdx === -1) currentIdx = 0;
 
@@ -124,6 +126,11 @@ export const BatchGradingModal: React.FC<BatchGradingModalProps> = ({
       if (currentIdx >= students.length) {
         clearInterval(interval);
         setIsRunning(false);
+        showSuccessAlert(
+          'Batch Evaluation Complete!',
+          `<div class="space-y-1"><p class="text-xs text-zinc-300">Successfully evaluated all <strong>${students.length}</strong> student submissions.</p><p class="text-[11px] text-zinc-400">Class analytics and grade books are now updated.</p></div>`,
+          2500
+        );
         return;
       }
 

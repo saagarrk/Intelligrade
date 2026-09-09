@@ -16,7 +16,10 @@ import {
   Sparkles, 
   BookMarked, 
   BrainCircuit, 
-  Layers
+  Layers,
+  Palette,
+  Lightbulb,
+  Users
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -35,6 +38,10 @@ import {
 } from 'recharts';
 import { ExamPaper, StudentSubmission, PipelineStage } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import { HowItWorksGuide } from './HowItWorksGuide';
+import { exportStudentEvaluationPDF } from '../utils/pdfExport';
+import { showSweetToast } from '../utils/sweetAlert';
 
 interface StudentDashboardProps {
   exams: ExamPaper[];
@@ -58,10 +65,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenAppealModal,
   initialTab = 'scorecard'
 }) => {
-  const { user } = useAuth();
+  const { user, switchRole } = useAuth();
+  const { currentTheme, setIsThemeModalOpen } = useTheme();
   const [studentTab, setStudentTab] = useState<'scorecard' | 'questions' | 'radar' | 'appeals'>(initialTab);
   const [selectedQuestionIdx, setSelectedQuestionIdx] = useState<number>(0);
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
+  const [isHowItWorksOpen, setIsHowItWorksOpen] = useState<boolean>(false);
 
   // Find submissions for current student
   const studentSubmissions = submissions.filter(s => 
@@ -100,9 +109,24 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const activeQuestion = activeSubmission.questionEvaluations[selectedQuestionIdx] || activeSubmission.questionEvaluations[0];
   const activeExamQuestion = currentExam.questions.find(q => q.questionNumber === activeQuestion?.questionNumber);
 
-  const handleDownloadReport = () => {
-    setDownloadSuccess(`Generated official grade transcript for ${activeSubmission.studentName} (${currentExam.courseCode})`);
-    setTimeout(() => setDownloadSuccess(null), 3500);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  const handleDownloadReport = async () => {
+    try {
+      setIsExportingPdf(true);
+      await exportStudentEvaluationPDF(activeSubmission, currentExam, {
+        institutionName: user?.department ? `DEPARTMENT OF ${user.department.toUpperCase()}` : 'DEPARTMENT OF COMPUTER SCIENCE & ENGINEERING',
+        evaluatorName: 'Faculty Evaluation Board'
+      });
+      showSweetToast(`Official Grade Transcript PDF exported for ${activeSubmission.studentName}`, 'success');
+      setDownloadSuccess(`Official grade transcript PDF exported for ${activeSubmission.studentName} (${currentExam.courseCode})`);
+      setTimeout(() => setDownloadSuccess(null), 4000);
+    } catch (error) {
+      console.error('Error generating transcript PDF:', error);
+      showSweetToast('Could not generate PDF transcript. Please try again.', 'error');
+    } finally {
+      setIsExportingPdf(false);
+    }
   };
 
   return (
@@ -119,7 +143,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-2xl font-bold tracking-tight text-white">
-                  Welcome back, {user?.name || 'Alex Rivera'}
+                  Welcome back, {user?.name || 'Aarav Sharma'}
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   Student Dashboard
@@ -147,6 +171,26 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
           <div className="flex flex-wrap items-center gap-3">
             <button
+              id="btn-student-how-it-works"
+              onClick={() => setIsHowItWorksOpen(true)}
+              className="px-3.5 py-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-white text-xs font-semibold border border-indigo-500/40 transition shadow-sm flex items-center gap-1.5"
+              title="Learn how IntelliGrade evaluates handwritten papers"
+            >
+              <Lightbulb className="w-4 h-4 text-amber-300" />
+              <span>How It Works</span>
+            </button>
+
+            <button
+              id="btn-student-change-theme"
+              onClick={() => setIsThemeModalOpen(true)}
+              className="px-3.5 py-2.5 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-zinc-700 transition shadow-sm flex items-center gap-1.5"
+              title="Change theme colors & appearance"
+            >
+              <Palette className="w-4 h-4" style={{ color: currentTheme.colors.accentPrimary }} />
+              <span>Theme: {currentTheme.name.split(' ')[0]}</span>
+            </button>
+
+            <button
               id="btn-student-appeal-dash"
               onClick={onOpenAppealModal}
               className="px-4 py-2.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 text-xs font-semibold border border-emerald-800/60 transition shadow-sm flex items-center gap-1.5"
@@ -158,10 +202,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             <button
               id="btn-student-download-transcript"
               onClick={handleDownloadReport}
-              className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-zinc-700 transition flex items-center gap-1.5"
+              disabled={isExportingPdf}
+              className="px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-200 text-xs font-semibold border border-zinc-700 transition flex items-center gap-1.5 shadow-sm"
+              title="Download official evaluation report and grade transcript as formatted PDF"
             >
-              <Download className="w-4 h-4" />
-              <span>Download Official Transcript</span>
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span>{isExportingPdf ? 'Generating PDF...' : 'Download Official Transcript (PDF)'}</span>
             </button>
           </div>
         </div>
@@ -192,6 +238,44 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* Friendly Guidance Card for Ease of Understanding */}
+      <div 
+        id="student-orientation-banner"
+        className="p-4 rounded-xl bg-zinc-900 border border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm"
+      >
+        <div className="flex items-start sm:items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
+            <Lightbulb className="w-4 h-4 text-amber-300" />
+          </div>
+          <div>
+            <span className="font-bold text-white block">
+              Student Examination Portal
+            </span>
+            <span className="text-zinc-400 leading-relaxed">
+              You are reviewing your official graded paper for <strong className="text-zinc-200">{currentExam.title}</strong>. Want to test uploading a handwritten paper and running the AI grader?
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => setIsHowItWorksOpen(true)}
+            className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium border border-zinc-700 transition"
+          >
+            How It Works
+          </button>
+          <button
+            onClick={async () => {
+              await switchRole('teacher');
+              showSweetToast('Switched to Teacher Mode: Upload papers & grade them!', 'success');
+            }}
+            className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Switch to Teacher Mode →</span>
+          </button>
         </div>
       </div>
 
@@ -743,7 +827,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     <PolarAngleAxis dataKey="skill" stroke="#a1a1aa" fontSize={11} />
                     <PolarRadiusAxis angle={30} domain={[0, 100]} stroke="#52525b" fontSize={10} />
                     <Radar
-                      name="Alex Rivera (My Score)"
+                      name={`${user?.name || 'Aarav Sharma'} (My Score)`}
                       dataKey="studentScore"
                       stroke="#10b981"
                       fill="#10b981"
@@ -831,12 +915,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
               <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-2 border-t border-zinc-900">
                 <span>Submitted: Today at 10:38 AM</span>
-                <span>Assigned to: Prof. Sarah Jenkins</span>
+                <span>Assigned to: Prof. Ananya Sen</span>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* How It Works Explanatory Guide Modal */}
+      <HowItWorksGuide
+        isOpen={isHowItWorksOpen}
+        onClose={() => setIsHowItWorksOpen(false)}
+      />
 
     </div>
   );

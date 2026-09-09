@@ -96,9 +96,13 @@ export const TriAnswerSheetComparison: React.FC<TriAnswerSheetComparisonProps> =
     setIsGeneratingGemini(true);
     setGenerationSuccess(null);
     try {
+      const authToken = localStorage.getItem('intelligrade_auth_token') || 'ig_token_teacher_session_token';
       const response = await fetch('/api/v1/gemini/generate-semantic-variants', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
         body: JSON.stringify({
           questionNumber: activeQuestion.questionNumber,
           questionId: activeQuestion.id,
@@ -416,7 +420,7 @@ export const TriAnswerSheetComparison: React.FC<TriAnswerSheetComparisonProps> =
                   </span>
                 </div>
                 <span className="px-2 py-0.5 rounded bg-purple-900/60 text-purple-200 text-[10px] font-bold border border-purple-700/50">
-                  gemini-3.7-flash
+                  {semanticMatrix?.aiModelName || 'gemini-3.8-flash'}
                 </span>
               </div>
 

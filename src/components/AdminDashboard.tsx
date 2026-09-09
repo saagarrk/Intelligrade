@@ -20,7 +20,8 @@ import {
   Shield,
   Layers,
   Sparkles,
-  BarChart3
+  BarChart3,
+  Palette
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -36,6 +37,7 @@ import {
 } from 'recharts';
 import { PipelineStage, UserRole } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
 
 interface AdminDashboardProps {
   onNavigateStage: (stage: PipelineStage) => void;
@@ -72,9 +74,9 @@ const DEPARTMENT_METRICS = [
 ];
 
 const AUDIT_FEED = [
-  { id: 'EVT-904', time: '10:42:18', actor: 'Prof. Jenkins (Teacher)', action: 'Override Question 2 Mark (+1.0)', status: 'Success' },
-  { id: 'EVT-903', time: '10:38:05', actor: 'Alex Rivera (Student)', action: 'Submitted Appeal Ticket #APP-101', status: 'Success' },
-  { id: 'EVT-902', time: '10:15:22', actor: 'Dr. Vance (Admin)', action: 'Updated MySQL Connection Pool Config', status: 'Success' },
+  { id: 'EVT-904', time: '10:42:18', actor: 'Prof. Sen (Teacher)', action: 'Override Question 2 Mark (+1.0)', status: 'Success' },
+  { id: 'EVT-903', time: '10:38:05', actor: 'Aarav Sharma (Student)', action: 'Submitted Appeal Ticket #APP-101', status: 'Success' },
+  { id: 'EVT-902', time: '10:15:22', actor: 'Dr. Kulkarni (Admin)', action: 'Updated MySQL Connection Pool Config', status: 'Success' },
   { id: 'EVT-901', time: '09:55:10', actor: 'System AI Engine', action: 'Batch Processed 24 Exam Papers (CS-301)', status: 'Success' },
   { id: 'EVT-900', time: '09:30:14', actor: 'Unknown IP (203.0.113.1)', action: 'Unauthorized /api/v1/admin Attempt', status: 'Blocked' }
 ];
@@ -85,6 +87,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onOpenCustomExamModal
 }) => {
   const { user } = useAuth();
+  const { currentTheme, setIsThemeModalOpen } = useTheme();
   const [telemetry, setTelemetry] = useState<SystemTelemetry>(TELEMETRY_MOCK);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
@@ -126,7 +129,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </span>
               </div>
               <p className="text-xs text-zinc-400 mt-1">
-                Administrator: <strong className="text-zinc-200">{user?.name || 'Dr. Eleanor Vance'}</strong> • Role: <strong className="text-amber-400">Institutional SuperAdmin</strong>
+                Administrator: <strong className="text-zinc-200">{user?.name || 'Dr. Rajesh Kulkarni'}</strong> • Role: <strong className="text-amber-400">Institutional SuperAdmin</strong>
               </p>
               <div className="flex items-center gap-4 mt-3 text-xs text-zinc-300">
                 <span className="flex items-center gap-1.5">
@@ -142,6 +145,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              id="btn-admin-change-theme"
+              onClick={() => setIsThemeModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-zinc-700 transition flex items-center gap-1.5"
+              title="Change theme colors & appearance"
+            >
+              <Palette className="w-3.5 h-3.5" style={{ color: currentTheme.colors.accentPrimary }} />
+              <span>Theme: {currentTheme.name.split(' ')[0]}</span>
+            </button>
+
             <button
               onClick={handleRefreshTelemetry}
               disabled={isRefreshing}

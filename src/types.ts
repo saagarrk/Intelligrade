@@ -62,10 +62,20 @@ export interface ExamPaper {
   id: string;
   title: string;
   subject: string;
+  courseCode?: string;
   gradeLevel: string;
   totalMarks: number;
+  durationMinutes?: number;
   instructions: string[];
   questions: QuestionItem[];
+  questionPaperFile?: {
+    name: string;
+    size: number;
+    type: 'image' | 'pdf';
+    pageCount: number;
+    pagesDataUrls: string[];
+    uploadedAt: string;
+  };
 }
 
 export interface PreprocessingConfig {
@@ -78,7 +88,7 @@ export interface PreprocessingConfig {
   skewAngle: number; // -15 to 15 deg
   thinning: boolean; // Zhang-Suen morphological thinning
   thinningIterations: number; // 1 to 5
-  thresholdingType: 'otsu' | 'sauvola' | 'adaptive_mean';
+  thresholdingType: 'otsu' | 'sauvola' | 'adaptive_mean' | 'adaptive';
   binarizationThreshold: number; // 0 to 255
 }
 
@@ -121,6 +131,8 @@ export interface ConceptMatchEvaluation {
   concept: string;
   requiredWeight: number;
   awardedWeight: number;
+  awardedMarks?: number;
+  weightMarks?: number;
   status: 'Full' | 'Partial' | 'Missing';
   matchedStudentPhrases: string[];
   synonymUsed?: string;
@@ -211,6 +223,18 @@ export interface StudentSubmission {
 
 export type UserRole = 'student' | 'teacher' | 'admin';
 
+export interface RegisterData {
+  name: string;
+  email: string;
+  password: string;
+  role: UserRole;
+  department?: string;
+  rollNumber?: string;
+  title?: string;
+  adminKey?: string;
+  teacherKey?: string;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -247,3 +271,27 @@ export type PipelineStage =
   | 'insights'
   | 'architecture'
   | 'user_management';
+
+export interface QuestionScoreItem {
+  questionNumber: number;
+  score: number;
+  maxMarks: number;
+  questionTopic?: string;
+}
+
+export interface MockEmailAlert {
+  id: string;
+  recipientEmail: string;
+  studentName: string;
+  studentRollNumber: string;
+  courseCode: string;
+  examTitle: string;
+  scoreAwarded: number;
+  maxMarks: number;
+  percentageScore: number;
+  timestamp: string;
+  status: 'Delivered' | 'Dispatched';
+  subject: string;
+  feedbackSummary?: string;
+  questionScores?: QuestionScoreItem[];
+}

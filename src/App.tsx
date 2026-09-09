@@ -9,7 +9,9 @@ import {
   PreprocessingConfig, 
   QuestionEvaluation, 
   QuestionItem,
-  PipelineStage
+  PipelineStage,
+  MockEmailAlert,
+  PersonalizedInsight
 } from './types';
 import { 
   evaluateQuestionDynamically, 
@@ -17,6 +19,8 @@ import {
 } from './utils/dynamicGrading';
 import { API_ENDPOINTS } from './constants/theme';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider, useTheme } from './context/ThemeContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Navbar } from './components/Navbar';
 import { StudentDashboard } from './components/StudentDashboard';
 import { TeacherDashboard } from './components/TeacherDashboard';
@@ -30,11 +34,17 @@ import { UserManagementView } from './components/UserManagementView';
 import { BatchGradingModal } from './components/BatchGradingModal';
 import { CustomExamModal } from './components/CustomExamModal';
 import { LoginModal } from './components/LoginModal';
+import { AuthPage } from './components/AuthPage';
 import { StudentReevaluationModal } from './components/StudentReevaluationModal';
-import { Lock, ShieldAlert, GraduationCap, ArrowRight } from 'lucide-react';
+import { MockEmailModal } from './components/MockEmailModal';
+import { ThemeModal } from './components/ThemeModal';
+import { TeacherDashboardSkeleton, StudentDashboardSkeleton } from './components/Skeleton';
+import { Lock, ShieldAlert, GraduationCap, ArrowRight, Palette } from 'lucide-react';
+import { showLogoutConfirmation, showSweetToast, showSuccessAlert } from './utils/sweetAlert';
 
 function AppContent() {
-  const { user, role, isStudent, isTeacher, isAdmin } = useAuth();
+  const { user, token, role, isStudent, isTeacher, isAdmin, logout } = useAuth();
+  const { isThemeModalOpen, setIsThemeModalOpen, currentTheme } = useTheme();
   const [exams, setExams] = useState<ExamPaper[]>(SAMPLE_EXAMS);
   const [selectedExamId, setSelectedExamId] = useState<string>(SAMPLE_EXAMS[0].id);
   const [submissions, setSubmissions] = useState<StudentSubmission[]>(SAMPLE_SUBMISSIONS);
@@ -46,7 +56,105 @@ function AppContent() {
   const [customExamModalOpen, setCustomExamModalOpen] = useState<boolean>(false);
   const [loginModalOpen, setLoginModalOpen] = useState<boolean>(false);
   const [appealModalOpen, setAppealModalOpen] = useState<boolean>(false);
+  const [showAuthPage, setShowAuthPage] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  // Mock Email Notifications State
+  const [mockEmailEnabled, setMockEmailEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('intelligrade_mock_email_notifications');
+    return saved === null ? true : saved === 'true';
+  });
+  const [dispatchedEmailAlerts, setDispatchedEmailAlerts] = useState<MockEmailAlert[]>(() => {
+    try {
+      const saved = localStorage.getItem('intelligrade_dispatched_mock_emails');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [activeEmailModal, setActiveEmailModal] = useState<MockEmailAlert | null>(null);
+
+  // Trigger simulated student email notification upon evaluation completion
+  const triggerMockEmailAlert = async (
+    sub: StudentSubmission,
+    exam: ExamPaper,
+    score: number,
+    pct: number,
+    evals: QuestionEvaluation[],
+    insights?: string | PersonalizedInsight
+  ) => {
+    if (!mockEmailEnabled) {
+      console.log('Mock email alert skipped: toggle is disabled in Teacher Dashboard.');
+      return;
+    }
+
+    const studentEmail = `${sub.studentName.toLowerCase().replace(/\s+/g, '.')}@university.edu`;
+    const questionScores = evals.map(e => ({
+      questionNumber: e.questionNumber,
+      score: e.teacherOverrideMarks !== undefined ? e.teacherOverrideMarks : e.awardedMarks,
+      maxMarks: e.maxMarks,
+      questionTopic: exam.questions.find(q => q.questionNumber === e.questionNumber)?.topic || `Question ${e.questionNumber}`
+    }));
+
+    const summaryText = typeof insights === 'string'
+      ? insights
+      : (insights?.overallSummary || sub.personalizedInsights?.overallSummary || 'Automated rubric evaluation completed successfully.');
+
+    const newAlert: MockEmailAlert = {
+      id: `dispatch_${Date.now()}`,
+      recipientEmail: studentEmail,
+      studentName: sub.studentName,
+      studentRollNumber: sub.studentRollNumber,
+      courseCode: exam.courseCode || 'CS-301',
+      examTitle: exam.title,
+      scoreAwarded: score,
+      maxMarks: exam.totalMarks,
+      percentageScore: pct,
+      timestamp: new Date().toISOString(),
+      status: 'Delivered',
+      subject: `[IntelliGrade] Grading Complete: ${exam.courseCode || 'CS-301'} ${exam.title} Results Published`,
+      feedbackSummary: summaryText,
+      questionScores
+    };
+
+    // 1. Sync to backend audit log
+    try {
+      await fetch(API_ENDPOINTS.NOTIFY_MOCK_EMAIL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token || 'ig_session_token'}`
+        },
+        body: JSON.stringify({
+          recipientEmail: newAlert.recipientEmail,
+          studentName: newAlert.studentName,
+          studentRollNumber: newAlert.studentRollNumber,
+          courseCode: newAlert.courseCode,
+          examTitle: newAlert.examTitle,
+          scoreAwarded: newAlert.scoreAwarded,
+          maxMarks: newAlert.maxMarks,
+          percentageScore: newAlert.percentageScore,
+          feedbackSummary: newAlert.feedbackSummary,
+          questionScores: newAlert.questionScores
+        })
+      });
+    } catch (err) {
+      console.warn('Backend notification logging note:', err);
+    }
+
+    // 2. Persist to state and localStorage
+    setDispatchedEmailAlerts(prev => {
+      const updated = [newAlert, ...prev];
+      localStorage.setItem('intelligrade_dispatched_mock_emails', JSON.stringify(updated.slice(0, 20)));
+      return updated;
+    });
+
+    // 3. Open simulated student email alert modal
+    setActiveEmailModal(newAlert);
+
+    // 4. Toast notification
+    showSweetToast(`📧 Mock Email: 'Grading Complete' alert simulated for ${sub.studentName} (${pct}%)`, 'success');
+  };
 
   // Automatically sync activeTab to 'dashboard' when switching roles to show the dedicated dashboard
   useEffect(() => {
@@ -59,6 +167,16 @@ function AppContent() {
       setActiveTab('dashboard');
     }
   }, [isStudent, activeTab]);
+
+  // If user is not logged in or explicitly opened AuthPage, show full screen AuthPage
+  if (!user || showAuthPage) {
+    return (
+      <AuthPage 
+        onBackToApp={user ? () => setShowAuthPage(false) : undefined} 
+        initialRole={role}
+      />
+    );
+  }
 
   // Active exam & submission
   const currentExam = exams.find(e => e.id === selectedExamId) || exams[0];
@@ -145,10 +263,13 @@ function AppContent() {
         };
       });
 
-      // 2. Call semantic evaluation endpoint
+      // 2. Call semantic evaluation endpoint with Bearer JWT Authorization header
       const evalResp = await fetch(API_ENDPOINTS.GRADE_EVALUATE, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token || 'ig_session_token'}`
+        },
         body: JSON.stringify({
           questions: currentExam.questions,
           studentAnswers: studentAnswersPayload,
@@ -171,12 +292,20 @@ function AppContent() {
           personalizedInsights: evalData.personalizedInsights || sub.personalizedInsights,
           predictiveAnalytics: evalData.predictiveAnalytics || sub.predictiveAnalytics
         }));
-        setStatusMessage('AI Pipeline Execution Complete. Results synchronized.');
+
+        // Automatically trigger simulated mock email notification if enabled
+        await triggerMockEmailAlert(
+          currentSubmission,
+          currentExam,
+          evalData.totalAwardedMarks,
+          evalData.percentageScore,
+          evalData.evaluations,
+          evalData.personalizedInsights
+        );
       } else {
         throw new Error('Invalid evaluations structure returned');
       }
 
-      setTimeout(() => setStatusMessage(null), 3500);
       setActiveTab('grading');
     } catch (e) {
       console.warn('API pipeline notice, using dynamic local NLP engine:', e);
@@ -207,8 +336,16 @@ function AppContent() {
         predictiveAnalytics: predictive
       }));
 
-      setStatusMessage('Dynamic NLP Pipeline evaluation complete.');
-      setTimeout(() => setStatusMessage(null), 3500);
+      // Automatically trigger simulated mock email notification in fallback path as well
+      await triggerMockEmailAlert(
+        currentSubmission,
+        currentExam,
+        totalScore,
+        percentage,
+        dynamicEvals,
+        insights
+      );
+
       setActiveTab('grading');
     } finally {
       setIsProcessing(false);
@@ -218,12 +355,11 @@ function AppContent() {
   const handleSaveCustomExam = (newExam: ExamPaper) => {
     setExams(prev => [newExam, ...prev]);
     setSelectedExamId(newExam.id);
-    setStatusMessage(`Created new exam rubric: "${newExam.title}"`);
-    setTimeout(() => setStatusMessage(null), 3500);
+    showSweetToast(`Exam rubric "${newExam.title}" created and activated!`, 'success');
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-[#fafafa] flex flex-col font-sans selection:bg-indigo-600 selection:text-white">
+    <div className="min-h-screen flex flex-col font-sans transition-colors duration-200" style={{ backgroundColor: currentTheme.colors.bgMain, color: currentTheme.colors.textPrimary }}>
       
       {/* Top Application Navigation with Auth & Role Switcher */}
       <Navbar
@@ -239,141 +375,144 @@ function AppContent() {
         isProcessing={isProcessing}
         onOpenBatchModal={() => setBatchModalOpen(true)}
         onOpenLoginModal={() => setLoginModalOpen(true)}
+        onOpenAuthPage={() => setShowAuthPage(true)}
         onOpenAppealModal={() => setAppealModalOpen(true)}
       />
 
-      {/* Global Status Toast Notification */}
-      {statusMessage && (
-        <div className="bg-indigo-600/90 text-white text-xs font-semibold px-4 py-2 text-center shadow-lg border-b border-indigo-400/30 flex items-center justify-center space-x-2 animate-fadeIn">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-          <span>{statusMessage}</span>
-        </div>
-      )}
-
-      {/* Main Content Body */}
+      {/* Main Content Body with ErrorBoundary Protection */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
-        
-        {/* Render Dedicated Role Dashboards */}
-        {activeTab === 'dashboard' && (
-          isStudent ? (
-            <StudentDashboard
-              exams={exams}
-              submissions={submissions}
-              selectedExamId={currentExam.id}
-              selectedSubmissionId={currentSubmission.id}
-              onSelectExam={setSelectedExamId}
-              onSelectSubmission={setSelectedSubmissionId}
-              onNavigateStage={(stage) => setActiveTab(stage)}
-              onOpenAppealModal={() => setAppealModalOpen(true)}
-            />
-          ) : isTeacher ? (
-            <TeacherDashboard
-              exams={exams}
-              submissions={submissions}
-              selectedExamId={currentExam.id}
-              selectedSubmissionId={currentSubmission.id}
-              onSelectExam={setSelectedExamId}
-              onSelectSubmission={setSelectedSubmissionId}
-              onNavigateStage={(stage) => setActiveTab(stage)}
-              onOpenBatchModal={() => setBatchModalOpen(true)}
-              onOpenCustomExamModal={() => setCustomExamModalOpen(true)}
+        <ErrorBoundary resetKey={activeTab}>
+          {/* Render Dedicated Role Dashboards with Skeleton loading during evaluation/fetches */}
+          {activeTab === 'dashboard' && (
+            isProcessing ? (
+              isStudent ? <StudentDashboardSkeleton /> : <TeacherDashboardSkeleton />
+            ) : isStudent ? (
+              <StudentDashboard
+                exams={exams}
+                submissions={submissions}
+                selectedExamId={currentExam.id}
+                selectedSubmissionId={currentSubmission.id}
+                onSelectExam={setSelectedExamId}
+                onSelectSubmission={setSelectedSubmissionId}
+                onNavigateStage={(stage) => setActiveTab(stage)}
+                onOpenAppealModal={() => setAppealModalOpen(true)}
+              />
+            ) : isTeacher ? (
+              <TeacherDashboard
+                exams={exams}
+                submissions={submissions}
+                selectedExamId={currentExam.id}
+                selectedSubmissionId={currentSubmission.id}
+                onSelectExam={setSelectedExamId}
+                onSelectSubmission={setSelectedSubmissionId}
+                onNavigateStage={(stage) => setActiveTab(stage)}
+                onOpenBatchModal={() => setBatchModalOpen(true)}
+                onOpenCustomExamModal={() => setCustomExamModalOpen(true)}
+                onRunAiPipeline={handleRunAiEvaluation}
+                isProcessing={isProcessing}
+                mockEmailEnabled={mockEmailEnabled}
+                onToggleMockEmail={setMockEmailEnabled}
+                dispatchedAlerts={dispatchedEmailAlerts}
+                onViewDispatchedAlert={(alert) => setActiveEmailModal(alert)}
+              />
+            ) : (
+              <AdminDashboard
+                onNavigateStage={(stage) => setActiveTab(stage)}
+                onOpenBatchModal={() => setBatchModalOpen(true)}
+                onOpenCustomExamModal={() => setCustomExamModalOpen(true)}
+              />
+            )
+          )}
+
+          {/* Render Stage View based on activeTab */}
+          {activeTab === 'preprocessing' && (
+            <Stage1Preprocessing
+              submission={currentSubmission}
+              exam={currentExam}
+              onUpdateConfig={handleUpdatePreprocessingConfig}
+              onNextStage={() => setActiveTab('digitization')}
+              onUploadCustomScan={handleUploadCustomScan}
+              onUpdateModelAnswers={handleUpdateModelAnswers}
               onRunAiPipeline={handleRunAiEvaluation}
+              isGradingProcessing={isProcessing}
+              onNavigateStage={(stage) => setActiveTab(stage)}
+            />
+          )}
+
+          {activeTab === 'digitization' && (
+            <Stage2Digitization
+              submission={currentSubmission}
+              exam={currentExam}
+              onUpdateExtractedText={handleUpdateExtractedText}
+              onUpdateModelAnswers={handleUpdateModelAnswers}
+              onNextStage={() => setActiveTab('grading')}
               isProcessing={isProcessing}
             />
-          ) : (
-            <AdminDashboard
-              onNavigateStage={(stage) => setActiveTab(stage)}
-              onOpenBatchModal={() => setBatchModalOpen(true)}
-              onOpenCustomExamModal={() => setCustomExamModalOpen(true)}
+          )}
+
+          {activeTab === 'grading' && (
+            <Stage3Grading
+              submission={currentSubmission}
+              exam={currentExam}
+              onUpdateEvaluation={handleUpdateEvaluation}
+              onNextStage={() => setActiveTab('insights')}
+              onOpenAppealModal={() => setAppealModalOpen(true)}
             />
-          )
-        )}
+          )}
 
-        {/* Render Stage View based on activeTab */}
-        {activeTab === 'preprocessing' && (
-          <Stage1Preprocessing
-            submission={currentSubmission}
-            exam={currentExam}
-            onUpdateConfig={handleUpdatePreprocessingConfig}
-            onNextStage={() => setActiveTab('digitization')}
-            onUploadCustomScan={handleUploadCustomScan}
-            onUpdateModelAnswers={handleUpdateModelAnswers}
-          />
-        )}
+          {activeTab === 'insights' && (
+            <Stage4Insights
+              submission={currentSubmission}
+              exam={currentExam}
+              allSubmissions={submissions}
+              onNextStage={() => setActiveTab(isAdmin ? 'architecture' : 'grading')}
+            />
+          )}
 
-        {activeTab === 'digitization' && (
-          <Stage2Digitization
-            submission={currentSubmission}
-            exam={currentExam}
-            onUpdateExtractedText={handleUpdateExtractedText}
-            onUpdateModelAnswers={handleUpdateModelAnswers}
-            onNextStage={() => setActiveTab('grading')}
-            isProcessing={isProcessing}
-          />
-        )}
-
-        {activeTab === 'grading' && (
-          <Stage3Grading
-            submission={currentSubmission}
-            exam={currentExam}
-            onUpdateEvaluation={handleUpdateEvaluation}
-            onNextStage={() => setActiveTab('insights')}
-            onOpenAppealModal={() => setAppealModalOpen(true)}
-          />
-        )}
-
-        {activeTab === 'insights' && (
-          <Stage4Insights
-            submission={currentSubmission}
-            exam={currentExam}
-            onNextStage={() => setActiveTab(isAdmin ? 'architecture' : 'grading')}
-          />
-        )}
-
-        {activeTab === 'architecture' && (
-          isStudent ? (
-            <div className="p-8 rounded-xl bg-zinc-900 border border-zinc-800 text-center space-y-4 max-w-xl mx-auto my-12">
-              <div className="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
-                <Lock className="w-6 h-6" />
+          {activeTab === 'architecture' && (
+            isStudent ? (
+              <div className="p-8 rounded-xl bg-zinc-900 border border-zinc-800 text-center space-y-4 max-w-xl mx-auto my-12">
+                <div className="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
+                  <Lock className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-white">Access Restricted: Instructor/Admin Only</h3>
+                <p className="text-xs text-zinc-400">
+                  The Spring Boot architecture and microservices specification requires Teacher or Admin authorization.
+                </p>
+                <button
+                  onClick={() => setLoginModalOpen(true)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
+                >
+                  Switch to Teacher or Admin Account
+                </button>
               </div>
-              <h3 className="text-base font-bold text-white">Access Restricted: Instructor/Admin Only</h3>
-              <p className="text-xs text-zinc-400">
-                The Spring Boot architecture and microservices specification requires Teacher or Admin authorization.
-              </p>
-              <button
-                onClick={() => setLoginModalOpen(true)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition"
-              >
-                Switch to Teacher or Admin Account
-              </button>
-            </div>
-          ) : (
-            <Stage5Architecture />
-          )
-        )}
+            ) : (
+              <Stage5Architecture />
+            )
+          )}
 
-        {activeTab === 'user_management' && (
-          !isAdmin ? (
-            <div className="p-8 rounded-xl bg-zinc-900 border border-zinc-800 text-center space-y-4 max-w-xl mx-auto my-12">
-              <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto">
-                <ShieldAlert className="w-6 h-6" />
+          {activeTab === 'user_management' && (
+            !isAdmin ? (
+              <div className="p-8 rounded-xl bg-zinc-900 border border-zinc-800 text-center space-y-4 max-w-xl mx-auto my-12">
+                <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center mx-auto">
+                  <ShieldAlert className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-white">Administrator Authorization Required</h3>
+                <p className="text-xs text-zinc-400">
+                  User management, RBAC directory, and security audit logs are restricted to Administrator credentials.
+                </p>
+                <button
+                  onClick={() => setLoginModalOpen(true)}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition"
+                >
+                  Log In as Administrator
+                </button>
               </div>
-              <h3 className="text-base font-bold text-white">Administrator Authorization Required</h3>
-              <p className="text-xs text-zinc-400">
-                User management, RBAC directory, and security audit logs are restricted to Administrator credentials.
-              </p>
-              <button
-                onClick={() => setLoginModalOpen(true)}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg transition"
-              >
-                Log In as Administrator
-              </button>
-            </div>
-          ) : (
-            <UserManagementView />
-          )
-        )}
-
+            ) : (
+              <UserManagementView />
+            )
+          )}
+        </ErrorBoundary>
       </main>
 
       {/* Batch Grading Modal */}
@@ -403,16 +542,46 @@ function AppContent() {
         questions={currentSubmission.questionEvaluations}
       />
 
+      {/* Simulated Student Email Notification Modal */}
+      {activeEmailModal && (
+        <MockEmailModal
+          isOpen={Boolean(activeEmailModal)}
+          onClose={() => setActiveEmailModal(null)}
+          alert={activeEmailModal}
+          isPreviewMode={false}
+          onNavigateToGrading={() => {
+            setActiveEmailModal(null);
+            setActiveTab('grading');
+          }}
+        />
+      )}
+
+      {/* Theme Color Customization Modal */}
+      <ThemeModal
+        isOpen={isThemeModalOpen}
+        onClose={() => setIsThemeModalOpen(false)}
+      />
+
       {/* Bottom Global Status Bar with Active Session Info */}
       <footer className="bg-[#18181b] border-t border-[#27272a] py-3 px-6 text-xs text-slate-400">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className="flex items-center space-x-3 text-[11px]">
             <span className="flex items-center space-x-1.5 text-[#fafafa]">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: currentTheme.colors.accentPrimary }} />
               <span className="font-semibold">IntelliGrade Automated Engine</span>
             </span>
             <span className="text-[#27272a]">•</span>
             <span className="text-slate-400">Authenticated as: <strong className="text-zinc-200">{user?.name} ({role.toUpperCase()})</strong></span>
+            <span className="text-[#27272a]">•</span>
+            <button
+              id="footer-theme-btn"
+              onClick={() => setIsThemeModalOpen(true)}
+              className="text-zinc-300 hover:text-white transition-colors flex items-center gap-1.5 font-medium"
+              title="Change theme colors"
+            >
+              <Palette className="w-3.5 h-3.5" style={{ color: currentTheme.colors.accentPrimary }} />
+              <span>{currentTheme.name}</span>
+            </button>
           </div>
 
           <div className="flex items-center space-x-3 text-[11px]">
@@ -429,16 +598,32 @@ function AppContent() {
             )}
             <button
               onClick={() => setCustomExamModalOpen(true)}
-              className="text-indigo-400 hover:text-indigo-300 font-semibold transition-colors"
+              className="text-slate-300 hover:text-white transition-colors"
             >
-              + Create Custom Exam Rubric
+              + Create Exam Rubric
             </button>
             <span className="text-[#27272a]">•</span>
             <button
-              onClick={() => setLoginModalOpen(true)}
-              className="text-slate-400 hover:text-indigo-400 transition-colors"
+              id="footer-open-auth-page-btn"
+              onClick={() => setShowAuthPage(true)}
+              className="text-indigo-400 hover:text-indigo-300 font-semibold transition-colors flex items-center gap-1"
             >
-              Switch Account ({role})
+              <span>Auth Portal</span>
+            </button>
+            <span className="text-[#27272a]">•</span>
+            <button
+              id="footer-logout-btn"
+              onClick={async () => {
+                const confirmed = await showLogoutConfirmation();
+                if (confirmed) {
+                  logout();
+                  showSweetToast('Signed out of session', 'info');
+                  setShowAuthPage(true);
+                }
+              }}
+              className="text-rose-400 hover:text-rose-300 font-semibold transition-colors flex items-center gap-1"
+            >
+              <span>Log Out</span>
             </button>
           </div>
         </div>
@@ -450,8 +635,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

@@ -52,7 +52,7 @@ export const SAMPLE_EXAMS: ExamPaper[] = [
           questionId: 'q1_process_sync',
           officialModelAnswer: 'Mutual exclusion ensures only one process enters the critical section. Semaphores are synchronization variables supporting atomic wait(S) (decrement/block) and signal(S) (increment/unblock).',
           aiGeneratedAt: '2026-08-31T03:15:00.000Z',
-          aiModelName: 'gemini-3.7-flash',
+          aiModelName: 'gemini-3.8-flash',
           ownWordsVariations: [
             {
               variantId: 'var_1_analogy',
@@ -134,7 +134,7 @@ export const SAMPLE_EXAMS: ExamPaper[] = [
           questionId: 'q2_neural_backprop',
           officialModelAnswer: 'Backpropagation applies the Chain Rule in reverse from loss to inputs to compute partial derivatives dL/dw, allowing Gradient Descent (w = w - lr * grad) to minimize prediction error.',
           aiGeneratedAt: '2026-08-31T03:15:00.000Z',
-          aiModelName: 'gemini-3.7-flash',
+          aiModelName: 'gemini-3.8-flash',
           ownWordsVariations: [
             {
               variantId: 'var_2_intuitive',
@@ -202,7 +202,7 @@ export const SAMPLE_EXAMS: ExamPaper[] = [
           questionId: 'q3_transformer_attention',
           officialModelAnswer: 'Attention(Q,K,V) = softmax((QK^T)/sqrt(d_k))V. Q and K calculate similarity weights, scaled by sqrt(d_k) to prevent softmax saturation and vanishing gradients.',
           aiGeneratedAt: '2026-08-31T03:15:00.000Z',
-          aiModelName: 'gemini-3.7-flash',
+          aiModelName: 'gemini-3.8-flash',
           ownWordsVariations: [
             {
               variantId: 'var_3_search_engine',
@@ -316,7 +316,7 @@ export const INITIAL_SUBMISSIONS: StudentSubmission[] = [
   {
     id: 'sub_alex_901',
     examId: 'exam_cs_ai_301',
-    studentName: 'Alex Rivera',
+    studentName: 'Aarav Sharma',
     studentRollNumber: 'CS-2026-041',
     submissionDate: '2026-08-30 14:20',
     originalScanUrl: '/assets/samples/alex_rivera_scan.png',
@@ -551,7 +551,7 @@ export const INITIAL_SUBMISSIONS: StudentSubmission[] = [
       }
     ],
     personalizedInsights: {
-      overallSummary: 'Alex exhibits top-tier conceptual mastery across Operating Systems concurrency, Machine Learning backpropagation, and Modern Transformer attention mechanisms.',
+      overallSummary: 'Aarav exhibits top-tier conceptual mastery across Operating Systems concurrency, Machine Learning backpropagation, and Modern Transformer attention mechanisms.',
       keyStrengths: [
         'Precise mathematical definitions and algorithm formulation',
         'Strong grasp of hardware and architectural implications (e.g. softmax saturation, mutex locks)',

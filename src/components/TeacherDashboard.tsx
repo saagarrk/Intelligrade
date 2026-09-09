@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   FileCheck2, 
@@ -20,7 +20,15 @@ import {
   X,
   Layers,
   ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  Mail,
+  Send,
+  Bell,
+  RefreshCw,
+  Palette,
+  FileText,
+  Lightbulb,
+  GraduationCap
 } from 'lucide-react';
 import { 
   ResponsiveContainer, 
@@ -31,8 +39,14 @@ import {
   CartesianGrid, 
   Tooltip 
 } from 'recharts';
-import { ExamPaper, StudentSubmission, PipelineStage, QuestionEvaluation } from '../types';
+import { ExamPaper, StudentSubmission, PipelineStage, QuestionEvaluation, MockEmailAlert } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../context/ThemeContext';
+import { MockEmailModal } from './MockEmailModal';
+import { TeacherDashboardSkeleton } from './Skeleton';
+import { HowItWorksGuide } from './HowItWorksGuide';
+import { showSweetToast } from '../utils/sweetAlert';
+import { exportStudentEvaluationPDF, exportBatchEvaluationSummaryPDF } from '../utils/pdfExport';
 
 interface TeacherDashboardProps {
   exams: ExamPaper[];
@@ -46,6 +60,10 @@ interface TeacherDashboardProps {
   onOpenCustomExamModal: () => void;
   onRunAiPipeline: () => void;
   isProcessing: boolean;
+  mockEmailEnabled?: boolean;
+  onToggleMockEmail?: (enabled: boolean) => void;
+  dispatchedAlerts?: MockEmailAlert[];
+  onViewDispatchedAlert?: (alert: MockEmailAlert) => void;
 }
 
 interface PendingAppeal {
@@ -64,7 +82,7 @@ interface PendingAppeal {
 const INITIAL_APPEALS: PendingAppeal[] = [
   {
     id: 'APP-101',
-    studentName: 'Alex Rivera',
+    studentName: 'Aarav Sharma',
     rollNumber: 'CS-2026-041',
     courseCode: 'CS-301',
     questionNumber: 2,
@@ -76,7 +94,7 @@ const INITIAL_APPEALS: PendingAppeal[] = [
   },
   {
     id: 'APP-102',
-    studentName: 'Marcus Vance',
+    studentName: 'Rohan Deshmukh',
     rollNumber: 'CS-2026-088',
     courseCode: 'CS-301',
     questionNumber: 1,
@@ -99,13 +117,126 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onOpenBatchModal,
   onOpenCustomExamModal,
   onRunAiPipeline,
-  isProcessing
+  isProcessing,
+  mockEmailEnabled,
+  onToggleMockEmail,
+  dispatchedAlerts,
+  onViewDispatchedAlert
 }) => {
   const { user } = useAuth();
+  const { currentTheme, setIsThemeModalOpen } = useTheme();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Graded' | 'Under Review'>('All');
   const [appeals, setAppeals] = useState<PendingAppeal[]>(INITIAL_APPEALS);
   const [appealActionNotice, setAppealActionNotice] = useState<string | null>(null);
+
+  // Mock Email Notification State
+  const [internalMockEmailEnabled, setInternalMockEmailEnabled] = useState<boolean>(() => {
+    if (typeof mockEmailEnabled !== 'undefined') return mockEmailEnabled;
+    const stored = localStorage.getItem('intelligrade_mock_email_notifications');
+    return stored === null ? true : stored === 'true';
+  });
+  const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
+  const [previewAlert, setPreviewAlert] = useState<MockEmailAlert | null>(null);
+  const [isHowItWorksOpen, setIsHowItWorksOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof mockEmailEnabled !== 'undefined') {
+      setInternalMockEmailEnabled(mockEmailEnabled);
+    }
+  }, [mockEmailEnabled]);
+
+  const isEmailEnabled = typeof mockEmailEnabled !== 'undefined' ? mockEmailEnabled : internalMockEmailEnabled;
+
+  const handleToggleMockEmail = (newVal: boolean) => {
+    setInternalMockEmailEnabled(newVal);
+    localStorage.setItem('intelligrade_mock_email_notifications', String(newVal));
+    if (onToggleMockEmail) {
+      onToggleMockEmail(newVal);
+    }
+    if (newVal) {
+      showSweetToast("Mock Email Alerts Enabled: Students will receive simulated 'Grading Complete' notifications after AI evaluation.", "success");
+    } else {
+      showSweetToast("Mock Email Alerts Disabled: Student notifications muted.", "info");
+    }
+  };
+
+  const handleOpenEmailPreview = () => {
+    const selectedSub = submissions.find(s => s.id === selectedSubmissionId) || filteredSubmissions[0] || submissions[0];
+    const previewData: MockEmailAlert = {
+      id: `preview_${Date.now()}`,
+      recipientEmail: `${selectedSub.studentName.toLowerCase().replace(/\s+/g, '.')}@university.edu`,
+      studentName: selectedSub.studentName,
+      studentRollNumber: selectedSub.studentRollNumber,
+      courseCode: currentExam.courseCode,
+      examTitle: currentExam.title,
+      scoreAwarded: selectedSub.totalAwardedMarks,
+      maxMarks: selectedSub.totalMaxMarks,
+      percentageScore: selectedSub.percentageScore,
+      timestamp: new Date().toISOString(),
+      status: 'Delivered',
+      subject: `[IntelliGrade] Grading Complete: ${currentExam.courseCode} Midterm Examination Results Published`,
+      feedbackSummary: selectedSub.personalizedInsights?.overallSummary || 'Student demonstrates strong mastery of digital image preprocessing, Otsu thresholding, and morphological thinning.',
+      questionScores: (selectedSub.questionEvaluations || []).map(q => ({
+        questionNumber: q.questionNumber,
+        score: q.awardedMarks,
+        maxMarks: q.maxMarks,
+        questionTopic: currentExam.questions.find(item => item.questionNumber === q.questionNumber)?.topic || `Question ${q.questionNumber}`
+      }))
+    };
+    setPreviewAlert(previewData);
+    setPreviewModalOpen(true);
+  };
+
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  const handleRefreshBackend = async () => {
+    setIsRefreshing(true);
+    try {
+      await fetch('/api/v1/health');
+    } catch {
+      // ignore
+    }
+    setTimeout(() => {
+      setIsRefreshing(false);
+      showSweetToast('Dashboard data synchronized with Spring Boot backend', 'success');
+    }, 700);
+  };
+
+  const [isExportingCohortPdf, setIsExportingCohortPdf] = useState(false);
+
+  const handleExportSinglePdf = async (sub: StudentSubmission) => {
+    try {
+      await exportStudentEvaluationPDF(sub, currentExam, {
+        institutionName: user?.department ? `DEPARTMENT OF ${user.department.toUpperCase()}` : 'DEPARTMENT OF COMPUTER SCIENCE & ENGINEERING',
+        evaluatorName: user?.name || 'Faculty Evaluation Committee'
+      });
+      showSweetToast(`Official PDF dossier exported for ${sub.studentName} (${sub.studentRollNumber})`, 'success');
+    } catch (error) {
+      console.error('Failed to export student evaluation PDF:', error);
+      showSweetToast('Failed to export student PDF evaluation report', 'error');
+    }
+  };
+
+  const handleExportCohortLedger = async () => {
+    if (filteredSubmissions.length === 0) {
+      showSweetToast('No student submissions available to export in current filter', 'warning');
+      return;
+    }
+    try {
+      setIsExportingCohortPdf(true);
+      await exportBatchEvaluationSummaryPDF(filteredSubmissions, currentExam, {
+        institutionName: user?.department ? `DEPARTMENT OF ${user.department.toUpperCase()}` : 'DEPARTMENT OF COMPUTER SCIENCE & ENGINEERING',
+        evaluatorName: user?.name || 'Faculty Evaluation Committee'
+      });
+      showSweetToast(`Master Evaluation Ledger PDF generated for ${filteredSubmissions.length} students`, 'success');
+    } catch (error) {
+      console.error('Failed to export cohort PDF ledger:', error);
+      showSweetToast('Failed to export cohort evaluation ledger', 'error');
+    } finally {
+      setIsExportingCohortPdf(false);
+    }
+  };
 
   const currentExam = exams.find(e => e.id === selectedExamId) || exams[0];
   const examSubmissions = submissions.filter(s => s.examId === currentExam.id);
@@ -152,6 +283,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setTimeout(() => setAppealActionNotice(null), 3500);
   };
 
+  if (isRefreshing) {
+    return <TeacherDashboardSkeleton />;
+  }
+
   return (
     <div className="space-y-6 animate-fadeIn">
       
@@ -174,7 +309,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                 </span>
               </div>
               <p className="text-xs text-zinc-400 mt-1">
-                Instructor: <strong className="text-zinc-200">{user?.name || 'Prof. Sarah Jenkins'}</strong> • {user?.department || 'Department of Computer Science & Engineering'}
+                Instructor: <strong className="text-zinc-200">{user?.name || 'Prof. Ananya Sen'}</strong> • {user?.department || 'Department of Computer Science & Engineering'}
               </p>
               <div className="flex items-center gap-4 mt-3 text-xs text-zinc-300">
                 <span className="flex items-center gap-1.5">
@@ -190,6 +325,37 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              id="btn-teacher-how-it-works"
+              onClick={() => setIsHowItWorksOpen(true)}
+              className="px-3 py-2 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-white text-xs font-semibold border border-indigo-500/40 transition flex items-center gap-1.5 shadow-sm"
+              title="Learn how IntelliGrade works in simple steps"
+            >
+              <Lightbulb className="w-3.5 h-3.5 text-amber-300" />
+              <span>How It Works</span>
+            </button>
+
+            <button
+              id="btn-teacher-change-theme"
+              onClick={() => setIsThemeModalOpen(true)}
+              className="px-3 py-2 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold border border-zinc-700/80 transition flex items-center gap-1.5"
+              title="Change theme colors & appearance"
+            >
+              <Palette className="w-3.5 h-3.5" style={{ color: currentTheme.colors.accentPrimary }} />
+              <span>Theme: {currentTheme.name.split(' ')[0]}</span>
+            </button>
+
+            <button
+              id="btn-teacher-refresh-data"
+              onClick={handleRefreshBackend}
+              disabled={isRefreshing}
+              className="px-3 py-2 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold border border-zinc-700/80 transition flex items-center gap-1.5"
+              title="Fetch fresh data from backend (shows skeleton loading)"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-zinc-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </button>
+
             <button
               id="btn-teacher-create-rubric"
               onClick={onOpenCustomExamModal}
@@ -214,10 +380,116 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               disabled={isProcessing}
               className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-md transition flex items-center gap-1.5"
             >
-              <Sparkles className="w-4 h-4" />
+              <Sparkles className="w-4 h-4 text-amber-300" />
               <span>{isProcessing ? 'Grading...' : 'Run Automated AI Pipeline'}</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Quick-Start: 3 Simple Steps to Grade a Paper */}
+      <div 
+        id="teacher-quick-start-card"
+        className="p-5 rounded-2xl bg-zinc-900/90 border border-zinc-800 shadow-md relative overflow-hidden"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold text-xs">
+              ⚡
+            </span>
+            <div>
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <span>Quick Start: Grade a Paper in 3 Steps</span>
+                <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Easy Workflow
+                </span>
+              </h2>
+              <p className="text-[11px] text-zinc-400">
+                Follow these simple steps or click any action button below to run the AI grader
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsHowItWorksOpen(true)}
+            className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 self-start sm:self-auto hover:underline"
+          >
+            <Lightbulb className="w-3.5 h-3.5 text-amber-300" />
+            <span>Need help? Open Full Guide →</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          
+          {/* Step 1 */}
+          <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800/80 hover:border-zinc-700 transition flex flex-col justify-between space-y-2.5">
+            <div>
+              <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 mb-1">
+                <span className="text-indigo-400">STEP 1</span>
+                <span>Question Paper</span>
+              </div>
+              <h3 className="text-xs font-semibold text-white">
+                Select Exam & Rubric
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                Active: <strong className="text-zinc-200">{currentExam.title}</strong> ({currentExam.questions.length} Questions, {currentExam.totalMarks} Marks).
+              </p>
+            </div>
+            <button
+              onClick={onOpenCustomExamModal}
+              className="w-full py-1.5 px-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium border border-zinc-700 transition flex items-center justify-center gap-1.5"
+            >
+              <PlusCircle className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Create Custom Rubric</span>
+            </button>
+          </div>
+
+          {/* Step 2 */}
+          <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800/80 hover:border-zinc-700 transition flex flex-col justify-between space-y-2.5">
+            <div>
+              <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 mb-1">
+                <span className="text-indigo-400">STEP 2</span>
+                <span>Handwritten Sheet</span>
+              </div>
+              <h3 className="text-xs font-semibold text-white">
+                Upload Student Paper
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                Upload image (PNG/JPG) or multi-page PDF. The AI cleans scan tilt, shadows, and noise.
+              </p>
+            </div>
+            <button
+              onClick={() => onNavigateStage('preprocessing')}
+              className="w-full py-1.5 px-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg text-xs font-medium border border-zinc-700 transition flex items-center justify-center gap-1.5"
+            >
+              <Upload className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Upload / View Scan →</span>
+            </button>
+          </div>
+
+          {/* Step 3 */}
+          <div className="p-3.5 rounded-xl bg-indigo-950/40 border border-indigo-800/60 hover:border-indigo-700 transition flex flex-col justify-between space-y-2.5">
+            <div>
+              <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 mb-1">
+                <span className="text-indigo-300">STEP 3</span>
+                <span className="text-emerald-400">One Click</span>
+              </div>
+              <h3 className="text-xs font-semibold text-white">
+                Run Automated AI Grading
+              </h3>
+              <p className="text-[11px] text-indigo-200/80 mt-1 leading-relaxed">
+                Multimodal AI reads handwriting, evaluates concepts in student's own words, and awards marks.
+              </p>
+            </div>
+            <button
+              onClick={onRunAiPipeline}
+              disabled={isProcessing}
+              className="w-full py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5 shadow-sm"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>{isProcessing ? 'Evaluating...' : '⚡ Grade Paper Now'}</span>
+            </button>
+          </div>
+
         </div>
       </div>
 
@@ -230,6 +502,109 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           <span className="text-[10px] text-emerald-400 font-mono">Synced to Spring Boot Server</span>
         </div>
       )}
+
+      {/* Mock Student Email Notification System Banner */}
+      <div 
+        id="mock-email-notification-panel"
+        className={`p-4 rounded-2xl border transition-all ${
+          isEmailEnabled 
+            ? 'bg-gradient-to-r from-indigo-950/50 via-zinc-900 to-zinc-900 border-indigo-500/40 shadow-lg shadow-indigo-950/20' 
+            : 'bg-zinc-900/80 border-zinc-800'
+        }`}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-colors ${
+              isEmailEnabled 
+                ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30' 
+                : 'bg-zinc-800 text-zinc-500 border border-zinc-700/60'
+            }`}>
+              <Mail className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-white tracking-wide">
+                  Mock Email Notification System
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 border ${
+                  isEmailEnabled
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                    : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                }`}>
+                  {isEmailEnabled ? (
+                    <>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>Auto-Dispatch Enabled</span>
+                    </>
+                  ) : (
+                    <span>Muted / Disabled</span>
+                  )}
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                {isEmailEnabled 
+                  ? "When enabled, simulates sending a 'Grading Complete' alert to students once an AI pipeline evaluation is finished."
+                  : "Notifications disabled. No simulated alerts will be generated when AI pipeline evaluations complete."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-center">
+            {/* Preview Email Template Button */}
+            <button
+              id="btn-preview-mock-email"
+              onClick={handleOpenEmailPreview}
+              className="px-3 py-1.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-zinc-700 transition flex items-center gap-1.5 shadow-sm"
+              title="Preview the exact email template sent to students"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Preview Email</span>
+            </button>
+
+            {/* Toggle Switch */}
+            <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+              <span className="text-xs text-zinc-400 font-medium hidden md:inline">
+                {isEmailEnabled ? 'ON' : 'OFF'}
+              </span>
+              <button
+                id="toggle-mock-email-notification"
+                role="switch"
+                aria-checked={isEmailEnabled}
+                onClick={() => handleToggleMockEmail(!isEmailEnabled)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500/50 ${
+                  isEmailEnabled ? 'bg-indigo-600' : 'bg-zinc-700'
+                }`}
+                title={`Click to ${isEmailEnabled ? 'disable' : 'enable'} mock email alerts`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    isEmailEnabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Dispatched History Pill / Latest Alert Callout */}
+        {dispatchedAlerts && dispatchedAlerts.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-zinc-300">
+              <Send className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+              <span className="line-clamp-1">
+                Latest simulated alert: <strong className="text-white">{dispatchedAlerts[0].subject}</strong> to <span className="text-indigo-300">{dispatchedAlerts[0].studentName}</span> ({dispatchedAlerts[0].scoreAwarded}/{dispatchedAlerts[0].maxMarks} marks, {dispatchedAlerts[0].percentageScore}%)
+              </span>
+            </div>
+            <button
+              onClick={() => onViewDispatchedAlert ? onViewDispatchedAlert(dispatchedAlerts[0]) : (setPreviewAlert(dispatchedAlerts[0]), setPreviewModalOpen(true))}
+              className="text-indigo-400 hover:text-indigo-300 font-semibold text-xs flex items-center gap-1 flex-shrink-0 underline"
+            >
+              <span>View Dispatched Alert</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -369,6 +744,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
               {/* Search & Filter Controls */}
               <div className="flex items-center gap-2">
+                <button
+                  id="btn-teacher-export-cohort-pdf"
+                  onClick={handleExportCohortLedger}
+                  disabled={isExportingCohortPdf}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-rose-950/50 hover:bg-rose-900/60 disabled:opacity-50 text-rose-300 text-xs font-semibold rounded-lg border border-rose-800/60 shadow-sm transition"
+                  title="Export complete cohort evaluation ledger as formatted PDF for offline archival"
+                >
+                  <FileText className="w-3.5 h-3.5 text-rose-400" />
+                  <span>{isExportingCohortPdf ? 'Generating PDF...' : 'Export Cohort Ledger (PDF)'}</span>
+                </button>
+
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                   <input
@@ -430,17 +816,32 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                           </span>
                         </td>
                         <td className="py-3 text-right">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onSelectSubmission(sub.id);
-                              onNavigateStage('grading');
-                            }}
-                            className="px-2.5 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white transition text-[11px] font-semibold inline-flex items-center gap-1"
-                          >
-                            <span>Grade & Override</span>
-                            <ChevronRight className="w-3 h-3" />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              id={`export-pdf-sub-${sub.id}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleExportSinglePdf(sub);
+                              }}
+                              className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-rose-300 hover:text-white transition text-[11px] font-semibold inline-flex items-center gap-1 border border-zinc-700 shadow-xs"
+                              title={`Export official archival PDF for ${sub.studentName}`}
+                            >
+                              <FileText className="w-3 h-3 text-rose-400" />
+                              <span className="hidden sm:inline">PDF</span>
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectSubmission(sub.id);
+                                onNavigateStage('grading');
+                              }}
+                              className="px-2.5 py-1 rounded bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white transition text-[11px] font-semibold inline-flex items-center gap-1"
+                            >
+                              <span>Grade & Override</span>
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -611,6 +1012,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         </div>
 
       </div>
+
+      {/* Simulated Email Modal (Preview or Dispatched Alert) */}
+      {previewAlert && (
+        <MockEmailModal
+          isOpen={previewModalOpen}
+          onClose={() => setPreviewModalOpen(false)}
+          alert={previewAlert}
+          isPreviewMode={true}
+          onNavigateToGrading={() => {
+            setPreviewModalOpen(false);
+            onNavigateStage('grading');
+          }}
+        />
+      )}
+
+      {/* How It Works Explanatory Guide Modal */}
+      <HowItWorksGuide
+        isOpen={isHowItWorksOpen}
+        onClose={() => setIsHowItWorksOpen(false)}
+        onNavigateStage={onNavigateStage}
+        onRunDemo={onRunAiPipeline}
+      />
 
     </div>
   );

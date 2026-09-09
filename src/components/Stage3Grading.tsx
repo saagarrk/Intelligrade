@@ -14,10 +14,13 @@ import {
   MessageSquare,
   Lock,
   HelpCircle,
-  GraduationCap
+  GraduationCap,
+  FileText
 } from 'lucide-react';
 import { ExamPaper, StudentSubmission, QuestionEvaluation } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { exportStudentEvaluationPDF } from '../utils/pdfExport';
+import { showSweetToast } from '../utils/sweetAlert';
 
 interface Stage3Props {
   submission: StudentSubmission;
@@ -83,6 +86,28 @@ export const Stage3Grading: React.FC<Stage3Props> = ({
     onUpdateEvaluation(updated);
   };
 
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  const handleExportPDF = async () => {
+    try {
+      setIsExportingPdf(true);
+      await exportStudentEvaluationPDF(
+        { ...submission, questionEvaluations: evaluations },
+        exam,
+        {
+          institutionName: 'DEPARTMENT OF COMPUTER SCIENCE & ENGINEERING',
+          evaluatorName: isStudent ? 'Faculty Evaluation Board' : (user?.name || 'Faculty Evaluator')
+        }
+      );
+      showSweetToast(`Official evaluation report PDF exported for ${submission.studentName}`, 'success');
+    } catch (error) {
+      console.error('Failed to export PDF from Stage 3:', error);
+      showSweetToast('Failed to export PDF report', 'error');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -109,7 +134,18 @@ export const Stage3Grading: React.FC<Stage3Props> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              id="stage3-export-pdf-btn"
+              onClick={handleExportPDF}
+              disabled={isExportingPdf}
+              className="flex items-center space-x-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-rose-950/40 hover:bg-rose-900/50 disabled:opacity-50 text-rose-300 border border-rose-800/60 shadow-sm transition"
+              title="Export formatted PDF evaluation report for offline archival"
+            >
+              <FileText className="w-3.5 h-3.5 text-rose-400" />
+              <span>{isExportingPdf ? 'Exporting PDF...' : 'Export Archival PDF'}</span>
+            </button>
+
             {isStudent ? (
               <button
                 id="btn-appeal-from-stage3"

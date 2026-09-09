@@ -15,8 +15,12 @@ import {
   AlertTriangle,
   FileSpreadsheet,
   CheckCircle,
-  Database
+  Database,
+  Copy,
+  Eye,
+  EyeOff
 } from 'lucide-react';
+import { showSweetToast } from '../utils/sweetAlert';
 
 export const UserManagementView: React.FC = () => {
   const { user: currentUser, token, switchRole } = useAuth();
@@ -37,7 +41,7 @@ export const UserManagementView: React.FC = () => {
       userEmail: 'teacher@intelligrade.edu',
       userRole: 'teacher',
       action: 'EVALUATE_PAPER',
-      resource: 'CS301-Midterm-Alex-Rivera',
+      resource: 'CS301-Midterm-Aarav-Sharma',
       status: 'Success'
     },
     {
@@ -50,7 +54,9 @@ export const UserManagementView: React.FC = () => {
       status: 'Success'
     }
   ]);
-  const [activeTab, setActiveTab] = useState<'users' | 'matrix' | 'logs'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'matrix' | 'logs' | 'vault'>('users');
+  const [showAdminVaultKey, setShowAdminVaultKey] = useState<boolean>(false);
+  const [showTeacherVaultKey, setShowTeacherVaultKey] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   const fetchAdminData = async () => {
@@ -221,6 +227,19 @@ export const UserManagementView: React.FC = () => {
         >
           <Activity className="w-4 h-4" />
           <span>Security Audit Trail ({auditLogs.length})</span>
+        </button>
+
+        <button
+          id="tab-admin-vault"
+          onClick={() => setActiveTab('vault')}
+          className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition flex items-center gap-2 ${
+            activeTab === 'vault'
+              ? 'border-amber-500 text-amber-400 bg-amber-500/5'
+              : 'border-transparent text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <Key className="w-4 h-4 text-amber-400" />
+          <span>Secret Keys Vault (Confidential)</span>
         </button>
       </div>
 
@@ -425,6 +444,151 @@ export const UserManagementView: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Secret Keys Vault */}
+      {activeTab === 'vault' && (
+        <div className="space-y-6">
+          <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/30 text-xs text-amber-200/90 leading-relaxed flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-amber-300">Confidential Institutional Authorization Vault</p>
+              <p className="mt-1 text-zinc-300">
+                These secret security clearance keys are strictly restricted to authorized faculty members and system administrators. Students attempting to register under faculty or admin roles are rejected unless they provide their designated secret authorization key.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* 1. Teacher Secret Key Card */}
+            <div className="bg-zinc-900 border border-indigo-500/40 rounded-xl p-5 shadow-lg relative overflow-hidden">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                    <BookOpen className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Teacher / Faculty Secret Key</h3>
+                    <p className="text-[11px] text-zinc-400">Required for faculty registration and grade overrides</p>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/10 border border-indigo-500/30 text-indigo-300">
+                  FACULTY ONLY
+                </span>
+              </div>
+
+              <div className="my-4 p-3 bg-zinc-950 rounded-xl border border-zinc-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-semibold block">Authorization Passphrase</span>
+                  <span className="font-mono text-sm font-bold text-indigo-300 tracking-wider">
+                    {showTeacherVaultKey ? 'TEACHER-SEC-2026' : '••••••••••••••••'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowTeacherVaultKey(!showTeacherVaultKey)}
+                    className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition"
+                    title={showTeacherVaultKey ? 'Hide key' : 'Reveal key'}
+                  >
+                    {showTeacherVaultKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText('TEACHER-SEC-2026');
+                      showSweetToast('Teacher Secret Key copied to clipboard', 'success');
+                    }}
+                    className="p-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center gap-1 text-xs"
+                    title="Copy Teacher Secret Key"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-semibold">Copy</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 text-[11px] text-zinc-400 pt-2 border-t border-zinc-800">
+                <div className="flex items-center justify-between">
+                  <span>Authorized Role:</span>
+                  <span className="text-zinc-200 font-semibold">Faculty / Teacher</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Permitted Privileges:</span>
+                  <span className="text-indigo-300">Multimodal OCR, Rubrics, Overrides, Batch</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Clearance Level:</span>
+                  <span className="text-emerald-400 font-semibold">Academic Tier 2</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Admin Secret Key Card */}
+            <div className="bg-zinc-900 border border-amber-500/40 rounded-xl p-5 shadow-lg relative overflow-hidden">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">Administrator Master Key</h3>
+                    <p className="text-[11px] text-zinc-400">Required for root administrator provisioning</p>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-300">
+                  ROOT ADMIN
+                </span>
+              </div>
+
+              <div className="my-4 p-3 bg-zinc-950 rounded-xl border border-zinc-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-semibold block">Master Security Key</span>
+                  <span className="font-mono text-sm font-bold text-amber-300 tracking-wider">
+                    {showAdminVaultKey ? 'ADMIN-SEC-2026' : '••••••••••••••••'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminVaultKey(!showAdminVaultKey)}
+                    className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white transition"
+                    title={showAdminVaultKey ? 'Hide key' : 'Reveal key'}
+                  >
+                    {showAdminVaultKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText('ADMIN-SEC-2026');
+                      showSweetToast('Admin Master Key copied to clipboard', 'success');
+                    }}
+                    className="p-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition flex items-center gap-1 text-xs"
+                    title="Copy Admin Master Key"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-semibold">Copy</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 text-[11px] text-zinc-400 pt-2 border-t border-zinc-800">
+                <div className="flex items-center justify-between">
+                  <span>Authorized Role:</span>
+                  <span className="text-zinc-200 font-semibold">System Administrator / Dean</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Permitted Privileges:</span>
+                  <span className="text-amber-300">Full Root (*), RBAC Directory, Audit Logs</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span>Clearance Level:</span>
+                  <span className="text-amber-400 font-semibold">Institutional Root Tier 1</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

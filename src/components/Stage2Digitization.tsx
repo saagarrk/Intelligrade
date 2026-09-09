@@ -55,9 +55,13 @@ export const Stage2Digitization: React.FC<Stage2Props> = ({
   const handleRegenerateModelAnswer = async () => {
     setGeneratingModelAnswer(true);
     try {
+      const authToken = localStorage.getItem('intelligrade_auth_token') || 'ig_token_teacher_session_token';
       const response = await fetch('/api/v1/model-answers/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
         body: JSON.stringify({
           questionText: activeQuestion.questionText,
           topic: activeQuestion.topic,

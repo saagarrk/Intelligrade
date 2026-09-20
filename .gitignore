@@ -1,8 +1,41 @@
+# Dependencies & Build Artefacts
 node_modules/
-build/
 dist/
+build/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+.m2/
+.gradle/
+*.db
+*.h2.db
+
+# Python & AI Service
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE / Editor Files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

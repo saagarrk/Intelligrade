@@ -89,6 +89,39 @@ CREATE TABLE IF NOT EXISTS semantic_rubric_matrices (
 ) ENGINE=InnoDB;
 
 -- 7. STUDENT PAPER SUBMISSIONS (Sheet 1: Student Handwritten Papers)
+CREATE TABLE IF NOT EXISTS submissions (
+    id VARCHAR(64) PRIMARY KEY,
+    exam_id VARCHAR(64) NOT NULL,
+    student_id VARCHAR(64) NOT NULL,
+    student_name VARCHAR(128) NOT NULL,
+    student_roll_number VARCHAR(64) NOT NULL,
+    submission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    original_scan_url LONGTEXT,
+    ocr_raw_text LONGTEXT,
+    ocr_confidence_score DECIMAL(5,2) DEFAULT 95.00,
+    total_max_marks DECIMAL(6,2) NOT NULL DEFAULT 100.00,
+    ai_suggested_total_marks DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+    teacher_adjusted_marks DECIMAL(6,2) NULL,
+    final_marks DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+    percentage_score DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+    letter_grade VARCHAR(8) DEFAULT 'F',
+    evaluation_status VARCHAR(32) NOT NULL DEFAULT 'PENDING_TEACHER_REVIEW',
+    pipeline_status VARCHAR(32) DEFAULT 'PENDING_TEACHER_REVIEW',
+    is_reviewed_by_teacher BOOLEAN DEFAULT FALSE,
+    teacher_notes TEXT,
+    reviewed_by VARCHAR(128),
+    created_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_submission_exam_id (exam_id),
+    INDEX idx_submission_student_id (student_id),
+    INDEX idx_submission_roll_no (student_roll_number),
+    INDEX idx_submission_eval_status (evaluation_status),
+    INDEX idx_submission_created_at (created_timestamp)
+) ENGINE=InnoDB;
+
+-- Backwards-compatible view/table alias for student_submissions
 CREATE TABLE IF NOT EXISTS student_submissions (
     id VARCHAR(64) PRIMARY KEY,
     exam_id VARCHAR(64) NOT NULL,
@@ -125,7 +158,7 @@ CREATE TABLE IF NOT EXISTS submission_preprocessing (
     FOREIGN KEY (submission_id) REFERENCES student_submissions(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- 9. PER-QUESTION EVALUATIONS & AI / TEACHER OVERRIDES
+-- 9. PER-QUESTION EVALUATIONS & AI / TEACHER OVERRIDES (Legacy compatibility table)
 CREATE TABLE IF NOT EXISTS question_evaluations (
     id VARCHAR(64) PRIMARY KEY,
     submission_id VARCHAR(64) NOT NULL,
@@ -144,6 +177,90 @@ CREATE TABLE IF NOT EXISTS question_evaluations (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (submission_id) REFERENCES student_submissions(id) ON DELETE CASCADE,
     FOREIGN KEY (question_id) REFERENCES exam_questions(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- =========================================================================
+-- NEW NORMALIZED SCHEMA: ANSWERS, EVALUATIONS, CRITERIA & FEEDBACKS
+-- =========================================================================
+
+-- 10. ANSWERS (Per-Question student answers submitted with model benchmark)
+CREATE TABLE IF NOT EXISTS answers (
+    id VARCHAR(64) PRIMARY KEY,
+    submission_id VARCHAR(64) NOT NULL,
+    question_id VARCHAR(64) NULL,
+    question_number INT NOT NULL,
+    question_text TEXT NOT NULL,
+    student_answer LONGTEXT,
+    model_answer LONGTEXT,
+    max_marks DECIMAL(5,2) NOT NULL DEFAULT 10.00,
+    created_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (submission_id) REFERENCES submissions(id) ON DELETE CASCADE,
+    FOREIGN KEY (question_id) REFERENCES exam_questions(id) ON DELETE SET NULL,
+    INDEX idx_answer_submission_id (submission_id),
+    INDEX idx_answer_question_id (question_id),
+    INDEX idx_answer_sub_qnum (submission_id, question_number),
+    INDEX idx_answer_created_at (created_timestamp)
+) ENGINE=InnoDB;
+
+-- 11. EVALUATIONS (Per-Answer AI Evaluation, Confidence, Status & Teacher Adjustments)
+CREATE TABLE IF NOT EXISTS evaluations (
+    id VARCHAR(64) PRIMARY KEY,
+    answer_id VARCHAR(64) NOT NULL UNIQUE,
+    ai_suggested_marks DECIMAL(5,2) NULL,
+    ai_confidence DECIMAL(5,4) NULL,
+    ai_feedback TEXT NULL,
+    semantic_similarity_score DECIMAL(5,4) NULL,
+    teacher_adjusted_marks DECIMAL(5,2) NULL,
+    final_marks DECIMAL(5,2) NULL,
+    evaluation_status VARCHAR(32) NOT NULL DEFAULT 'PENDING_TEACHER_REVIEW',
+    is_teacher_reviewed BOOLEAN DEFAULT FALSE,
+    reviewed_by VARCHAR(128) NULL,
+    teacher_notes TEXT NULL,
+    created_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (answer_id) REFERENCES answers(id) ON DELETE CASCADE,
+    INDEX idx_eval_answer_id (answer_id),
+    INDEX idx_eval_status (evaluation_status),
+    INDEX idx_eval_created_at (created_timestamp)
+) ENGINE=InnoDB;
+
+-- 12. EVALUATION CRITERIA (Rubric Dimensions & Key Concept Breakdown)
+CREATE TABLE IF NOT EXISTS evaluation_criteria (
+    id VARCHAR(64) PRIMARY KEY,
+    evaluation_id VARCHAR(64) NOT NULL,
+    criterion_name VARCHAR(255) NOT NULL,
+    description TEXT NULL,
+    max_marks DECIMAL(5,2) NOT NULL DEFAULT 2.00,
+    ai_suggested_marks DECIMAL(5,2) NULL,
+    ai_confidence DECIMAL(5,4) NULL,
+    teacher_adjusted_marks DECIMAL(5,2) NULL,
+    final_marks DECIMAL(5,2) NULL,
+    match_status VARCHAR(32) DEFAULT 'FULL_MATCH',
+    feedback TEXT NULL,
+    created_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (evaluation_id) REFERENCES evaluations(id) ON DELETE CASCADE,
+    INDEX idx_crit_evaluation_id (evaluation_id),
+    INDEX idx_crit_match_status (match_status),
+    INDEX idx_crit_created_at (created_timestamp)
+) ENGINE=InnoDB;
+
+-- 13. FEEDBACKS (Multi-author Pedagogical Feedback & Teacher Observations)
+CREATE TABLE IF NOT EXISTS feedbacks (
+    id VARCHAR(64) PRIMARY KEY,
+    evaluation_id VARCHAR(64) NOT NULL,
+    feedback_type VARCHAR(64) NOT NULL DEFAULT 'AI_FEEDBACK',
+    feedback_text TEXT NOT NULL,
+    author VARCHAR(128) DEFAULT 'AI_EVALUATOR',
+    author_role VARCHAR(64) DEFAULT 'AI_SYSTEM',
+    is_public_to_student BOOLEAN DEFAULT TRUE,
+    created_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_timestamp TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (evaluation_id) REFERENCES evaluations(id) ON DELETE CASCADE,
+    INDEX idx_feedback_evaluation_id (evaluation_id),
+    INDEX idx_feedback_type (feedback_type),
+    INDEX idx_feedback_created_at (created_timestamp)
 ) ENGINE=InnoDB;
 
 -- 10. RE-EVALUATION / REMARKING APPEALS TABLE

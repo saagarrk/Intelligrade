@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # 1. Full-Stack Production Gateway & UI (Node.js 20 + Express + React 19)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: intelligrade-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - JWT_SECRET=${JWT_SECRET:-c2VjdXJlaW50ZWxsaWdyYWRlc2VjcmV0a2V5MjAyNnNwcmluZ2Jvb3Q=}
+      - TEACHER_SECRET_KEY=${TEACHER_SECRET_KEY:-TEACHER-SEC-2026}
+      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY:-ADMIN-SEC-2026}
+      - AI_SERVICE_SECRET_KEY=${AI_SERVICE_SECRET_KEY:-intelligrade-ai-internal-secret-token-2026}
+      - AI_SERVICE_URL=http://ai-service:8000/api/v1
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000,http://localhost:8080}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - intelligrade-network
+
+  # 2. AI Computer Vision & Evaluation Microservice (Python FastAPI + OpenCV + PyTorch)
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: intelligrade-ai-service
+    ports:
+      - "8000:8000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - AI_SERVICE_SECRET_KEY=${AI_SERVICE_SECRET_KEY:-intelligrade-ai-internal-secret-token-2026}
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - intelligrade-network
+
+  # 3. Enterprise Core Backend (Spring Boot 3 + Java 17) - Optional Architecture Module
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: intelligrade-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/intelligrade?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=rootpassword
+      - AI_SERVICE_URL=http://ai-service:8000/api/v1
+      - JWT_SECRET=${JWT_SECRET:-c2VjdXJlaW50ZWxsaWdyYWRlc2VjcmV0a2V5MjAyNnNwcmluZ2Jvb3Q=}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - intelligrade-network
+
+  # 4. Relational Database (MySQL 8.0)
+  mysql:
+    image: mysql:8.0
+    container_name: intelligrade-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_DATABASE=intelligrade
+      - MYSQL_ROOT_PASSWORD=rootpassword
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - intelligrade-network
+
+  # 5. Distributed Cache & Job Queue (Redis 7)
+  redis:
+    image: redis:7-alpine
+    container_name: intelligrade-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - intelligrade-network
+
+networks:
+  intelligrade-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:

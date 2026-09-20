@@ -20,11 +20,15 @@ spring:
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
 
-# IntelliGrade Security & Gemini AI Configuration
+# IntelliGrade Security, Python AI Microservice & Gemini Configuration
 intelligrade:
   jwt:
     secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
     expiration-ms: 86400000 # 24 hours
+  ai-service:
+    url: ${AI_SERVICE_URL:http://localhost:8000}
+    connect-timeout-ms: 5000
+    read-timeout-ms: 30000
   gemini:
     api-key: ${GEMINI_API_KEY:}
     model: gemini-3.8-flash

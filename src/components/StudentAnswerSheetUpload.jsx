@@ -25,70 +25,6 @@ import {
 } from "lucide-react";
 import { processUploadedFile } from "../utils/fileUploadHelper";
 import { showSweetToast } from "../utils/sweetAlert";
-import { drawSampleHandwrittenPaper } from "../utils/imageProcessing";
-
-// Quick test presets to allow immediate testing without requiring local user image files
-const SAMPLE_SHEET_PRESETS = [
-  {
-    id: "preset-os-301",
-    label: "CS-301: OS Concurrency Exam",
-    candidateName: "Aarav Sharma",
-    rollNumber: "CS2026-042",
-    examTitle: "Operating Systems & Concurrency Midterm",
-    sampleAnswers: [
-      {
-        qNum: 1,
-        answerText: "Mutex provides mutual exclusion via binary locking where only 1 thread enters critical section. Counting semaphores use wait() / P() and signal() / V() atomic operations. Semaphore S initialized to N. In wait(S): while(S<=0); S--; In signal(S): S++; Solves dining philosophers without deadlock when using resource hierarchy."
-      },
-      {
-        qNum: 2,
-        answerText: "Demand paging loads virtual memory pages only when referenced. Page fault interrupt trap: OS traps to kernel mode -> checks valid bit in page table -> if invalid, locates frame in backing store swap -> issues disk I/O -> updates page table frame mapping -> re-executes faulted instruction. LRU replacement maintains time overhead."
-      },
-      {
-        qNum: 3,
-        answerText: "Banker's Algorithm maintains Available[m], Max[n][m], Allocation[n][m], and Need[i][j] = Max[i][j] - Allocation[i][j]. Safety test verifies if Work = Available and Finish[i]=false. If Need[i] <= Work, then Work = Work + Allocation[i]; Finish[i]=true. System is in safe state if all Finish[i] == true."
-      }
-    ]
-  },
-  {
-    id: "preset-algo-204",
-    label: "CS-204: Algorithms & AVL Trees",
-    candidateName: "Priya Patel",
-    rollNumber: "CS2026-088",
-    examTitle: "Data Structures & Algorithms Final",
-    sampleAnswers: [
-      {
-        qNum: 1,
-        answerText: "AVL tree is a self-balancing binary search tree where height difference between left and right subtrees (balance factor BF = h_left - h_right) is at most 1: BF in {-1, 0, +1}. Search complexity is strictly O(log n) worst-case. Unbalanced BST can degrade to linked list with O(n) search time. Rotations LL, RR, LR, RL restore height."
-      },
-      {
-        qNum: 2,
-        answerText: "Bellman-Ford computes single-source shortest path in O(V * E) time by relaxing all edges |V|-1 times. Unlike Dijkstra's greedy priority queue which fails on negative weights, Bellman-Ford detects negative weight cycles: running a |V|-th iteration; if dist[u] + weight(u,v) < dist[v], a negative cycle exists."
-      },
-      {
-        qNum: 3,
-        answerText: "Hash tables resolve collisions via Open Addressing (Linear Probing, Quadratic, Double Hashing) where items stay in the table, or Separate Chaining where each bucket is a linked list. Chaining tolerates load factors alpha > 1 with O(1 + alpha) average lookup."
-      }
-    ]
-  },
-  {
-    id: "preset-ee-102",
-    label: "EE-102: Digital Systems Paper",
-    candidateName: "Rohan Varma",
-    rollNumber: "EE2026-015",
-    examTitle: "Digital Systems & Architecture",
-    sampleAnswers: [
-      {
-        qNum: 1,
-        answerText: "Master-Slave D Flip-Flop consists of two gated D latches in cascade driven by complementary clock pulses. Master captures input D when Clock=1; Slave isolates output. On Clock transition to 0, Master latches and Slave updates output Q. Completely eliminates race-around condition because both latches are never transparent simultaneously."
-      },
-      {
-        qNum: 2,
-        answerText: "Karnaugh Maps organize boolean minterms into gray code adjacent cells where adjacent cells differ by only 1 literal. Groups of 2^k (1, 2, 4, 8, 16) cells are formed to eliminate redundant literals. For 4 variables A,B,C,D, wrapping around edges allows identifying essential prime implicants with minimum hardware gate count."
-      }
-    ]
-  }
-];
 
 export const StudentAnswerSheetUpload = ({
   onOcrComplete,
@@ -237,47 +173,6 @@ export const StudentAnswerSheetUpload = ({
     }
   };
 
-  // Preset generator for 1-click test papers
-  const handleLoadSamplePreset = (preset) => {
-    setUploadError(null);
-    setOcrResult(null);
-
-    if (!hiddenCanvasRef.current) {
-      hiddenCanvasRef.current = document.createElement("canvas");
-    }
-    const canvas = hiddenCanvasRef.current;
-    canvas.width = 900;
-    canvas.height = 1050;
-
-    setStudentName(preset.candidateName);
-    setStudentRoll(preset.rollNumber);
-
-    drawSampleHandwrittenPaper(
-      canvas,
-      preset.candidateName,
-      preset.rollNumber,
-      preset.examTitle,
-      preset.sampleAnswers,
-      false
-    );
-
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-    const mockDoc = {
-      name: `${preset.id}-student-answersheet.jpg`,
-      size: 482000,
-      type: "image",
-      mimeType: "image/jpeg",
-      pageCount: 1,
-      currentPage: 1,
-      pagesDataUrls: [dataUrl]
-    };
-
-    setUploadedDoc(mockDoc);
-    setCurrentPageIndex(0);
-    setActiveTab("preview");
-    showSweetToast(`Loaded sample test script for ${preset.candidateName}!`, "info");
-  };
-
   // Execute server-side OCR with progress loading animation
   const executeOcrProcessing = async (targetDoc = uploadedDoc) => {
     if (!targetDoc || !targetDoc.pagesDataUrls || targetDoc.pagesDataUrls.length === 0) {
@@ -374,8 +269,8 @@ export const StudentAnswerSheetUpload = ({
 
     } catch (err) {
       console.error("OCR execution error:", err);
-      setUploadError(err?.message || "OCR Processing encountered an issue. Falling back to local text recovery.");
-      showSweetToast("OCR processing notice: adaptive fallback engaged.", "info");
+      setUploadError(err?.message || "OCR Processing encountered an issue. Please verify uploaded document and retry.");
+      showSweetToast(`OCR failed: ${err?.message || "Please check image and retry."}`, "error");
     } finally {
       if (timerRef.current) clearInterval(timerRef.current);
       if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
@@ -535,34 +430,6 @@ export const StudentAnswerSheetUpload = ({
                   <p className="text-xs font-medium text-slate-200">Reading student script pages...</p>
                 </div>
               )}
-            </div>
-
-            {/* Quick-test Presets: 1-Click handwritten sample sheets */}
-            <div className="bg-[#121214] border border-[#27272a] rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-400 font-medium flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>No image file handy? Try a benchmark sample student script:</span>
-                </span>
-                <span className="text-[10px] text-slate-500 font-mono">1-Click Test</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {SAMPLE_SHEET_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    id={`btn-load-${preset.id}`}
-                    onClick={() => handleLoadSamplePreset(preset)}
-                    className="flex flex-col text-left p-2 rounded-md bg-[#18181b] hover:bg-[#27272a] border border-[#2e2e34] hover:border-indigo-500/40 text-xs transition-all group"
-                  >
-                    <span className="font-semibold text-slate-200 group-hover:text-indigo-300">
-                      {preset.label}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono mt-0.5">
-                      {preset.candidateName} ({preset.rollNumber})
-                    </span>
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         )}

@@ -17,52 +17,7 @@ import {
 import { processUploadedFile, extractQuestionsFromText } from "../utils/fileUploadHelper";
 import { showSweetToast } from "../utils/sweetAlert";
 import { AutomatedTestingSuite } from "./AutomatedTestingSuite";
-const SAMPLE_PRESETS = [
-  {
-    title: "Operating Systems & Concurrency Midterm",
-    subject: "Computer Science",
-    courseCode: "CS-301",
-    gradeLevel: "Undergraduate",
-    durationMinutes: 90,
-    totalMarks: 30,
-    rawText: `MIDTERM EXAMINATION: CS-301 OPERATING SYSTEMS & CONCURRENCY
-Time Allowed: 90 Minutes | Maximum Marks: 30
-Instructions: Answer all questions. Concise technical precision is required.
 
-Q1. Explain the concept of Mutual Exclusion and describe how Semaphores solve the Critical Section Problem with wait() and signal() primitives. [10 Marks]
-Q2. Describe the working mechanism of Demand Paging and Page Fault handling in virtual memory management. [10 Marks]
-Q3. Explain the Banker Algorithm for Deadlock Avoidance. State the necessary data structures: Available, Max, Allocation, and Need matrices. [10 Marks]`
-  },
-  {
-    title: "Data Structures & Algorithms Final Paper",
-    subject: "Computer Science",
-    courseCode: "CS-204",
-    gradeLevel: "Undergraduate",
-    durationMinutes: 120,
-    totalMarks: 35,
-    rawText: `FINAL EXAMINATION: CS-204 DATA STRUCTURES & ALGORITHMS
-Time: 120 Minutes | Total Marks: 35
-Instructions: Provide asymptotic notation and algorithm invariants where required.
-
-Q1. Contrast average and worst-case search complexity in an AVL Self-Balancing Tree versus an Unbalanced Binary Search Tree. [10 Marks]
-Q2. Describe the Bellman-Ford Shortest Path algorithm. Explain how it detects negative weight cycles unlike Dijkstra algorithm. [15 Marks]
-Q3. Explain the properties of Hash Tables with Open Addressing versus Chaining for collision resolution. [10 Marks]`
-  },
-  {
-    title: "Digital Systems & Computer Architecture",
-    subject: "Electrical & Computer Engineering",
-    courseCode: "EE-102",
-    gradeLevel: "Freshman / Sophomore",
-    durationMinutes: 60,
-    totalMarks: 25,
-    rawText: `SEMESTER EXAMINATION: EE-102 DIGITAL SYSTEMS
-Time: 60 Minutes | Total Marks: 25
-Instructions: Show circuit truth tables and state transition steps.
-
-Q1. Explain the operation of a Master-Slave D Flip-Flop and how it eliminates race conditions. [10 Marks]
-Q2. Explain the use of Karnaugh Maps (K-Maps) in minimizing 4-variable boolean expressions. [15 Marks]`
-  }
-];
 export const QuestionPaperUpload = ({
   currentExam,
   onUpdateExamPaper,
@@ -74,7 +29,7 @@ export const QuestionPaperUpload = ({
   const [isUploading, setIsUploading] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [dragActive, setDragActive] = useState(false);
-  const [rawText, setRawText] = useState(SAMPLE_PRESETS[0].rawText);
+  const [rawText, setRawText] = useState("");
   const [parsedExam, setParsedExam] = useState(null);
   const [parseSuccessMsg, setParseSuccessMsg] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
@@ -176,31 +131,39 @@ export const QuestionPaperUpload = ({
         throw new Error(data.error || "Failed to parse questions structure.");
       }
     } catch (err) {
-      console.warn("Parser API notice, extracting questions from raw text or structure:", err);
-      const fallbackExamData = extractQuestionsFromText(textToParse, examNameHint, currentExam.subject);
-      const fallbackExam = {
-        id: `exam_extracted_${Date.now()}`,
-        title: fallbackExamData.title || examNameHint || "Custom Question Paper",
-        subject: fallbackExamData.subject || currentExam.subject || "Academic Course",
-        courseCode: fallbackExamData.courseCode || currentExam.courseCode || "EXAM-101",
-        gradeLevel: fallbackExamData.gradeLevel || "Undergraduate",
-        totalMarks: fallbackExamData.totalMarks || 30,
-        durationMinutes: fallbackExamData.durationMinutes || 90,
-        instructions: fallbackExamData.instructions,
-        questions: fallbackExamData.questions,
-        questionPaperFile: activeDoc ? {
-          name: activeDoc.name,
-          size: activeDoc.size,
-          type: activeDoc.type,
-          pageCount: activeDoc.pageCount,
-          pagesDataUrls: activeDoc.pagesDataUrls,
-          uploadedAt: (/* @__PURE__ */ new Date()).toISOString()
-        } : void 0
-      };
-      setParsedExam(fallbackExam);
-      setParseSuccessMsg(`Extracted ${fallbackExam.questions.length} questions from document text.`);
-      onUpdateExamPaper(fallbackExam);
-      showSweetToast(`Loaded ${fallbackExam.questions.length} new questions from question paper!`, "info");
+      console.warn("Parser API notice, attempting client text extraction:", err);
+      try {
+        const fallbackExamData = extractQuestionsFromText(textToParse, examNameHint, currentExam.subject);
+        if (!fallbackExamData.questions || fallbackExamData.questions.length === 0) {
+          throw new Error("No questions could be extracted from the uploaded document text.");
+        }
+        const fallbackExam = {
+          id: `exam_extracted_${Date.now()}`,
+          title: fallbackExamData.title || examNameHint || "Custom Question Paper",
+          subject: fallbackExamData.subject || currentExam.subject || "Academic Course",
+          courseCode: fallbackExamData.courseCode || currentExam.courseCode || "EXAM-101",
+          gradeLevel: fallbackExamData.gradeLevel || "Undergraduate",
+          totalMarks: fallbackExamData.totalMarks || 30,
+          durationMinutes: fallbackExamData.durationMinutes || 90,
+          instructions: fallbackExamData.instructions,
+          questions: fallbackExamData.questions,
+          questionPaperFile: activeDoc ? {
+            name: activeDoc.name,
+            size: activeDoc.size,
+            type: activeDoc.type,
+            pageCount: activeDoc.pageCount,
+            pagesDataUrls: activeDoc.pagesDataUrls,
+            uploadedAt: (/* @__PURE__ */ new Date()).toISOString()
+          } : void 0
+        };
+        setParsedExam(fallbackExam);
+        setParseSuccessMsg(`Extracted ${fallbackExam.questions.length} questions from document text.`);
+        onUpdateExamPaper(fallbackExam);
+        showSweetToast(`Loaded ${fallbackExam.questions.length} new questions from question paper!`, "info");
+      } catch (extractErr) {
+        setErrorMsg(extractErr?.message || "Failed to parse questions from uploaded document. Please ensure the PDF has legible text.");
+        showSweetToast(extractErr?.message || "Failed to extract questions from PDF.", "error");
+      }
     } finally {
       setIsParsing(false);
     }
@@ -302,15 +265,6 @@ export const QuestionPaperUpload = ({
   >
             <Code className="w-4 h-4 text-emerald-400" />
             <span>Paste Questions Text / Markdown</span>
-          </button>
-
-          <button
-    id="tab-sample-presets"
-    onClick={() => setActiveTab("sample_presets")}
-    className={`px-4 py-3 font-semibold transition flex items-center gap-2 border-b-2 ${activeTab === "sample_presets" ? "border-indigo-500 text-white bg-[#18181b]" : "border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-[#151518]"}`}
-  >
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>1-Click Sample Academic Papers</span>
           </button>
 
           <button
@@ -478,53 +432,7 @@ export const QuestionPaperUpload = ({
           </div>}
 
         {
-    /* TAB 3: 1-Click Academic Sample Presets */
-  }
-        {activeTab === "sample_presets" && <div className="p-6 space-y-4">
-            <p className="text-xs text-zinc-400">
-              Select a pre-validated academic exam paper to immediately load authentic questions, rubrics, and answer keys:
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {SAMPLE_PRESETS.map((preset, idx) => <div
-    key={idx}
-    className="p-4 rounded-xl border border-[#27272a] bg-[#121215] hover:border-indigo-500/60 hover:bg-[#141418] transition flex flex-col justify-between space-y-3 group text-left"
-  >
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                        {preset.courseCode}
-                      </span>
-                      <span className="text-[10px] text-zinc-400 font-semibold">
-                        {preset.totalMarks} Marks
-                      </span>
-                    </div>
-                    <h4 className="text-xs font-bold text-white mt-2 group-hover:text-indigo-300 transition">
-                      {preset.title}
-                    </h4>
-                    <p className="text-[11px] text-zinc-400 mt-1 line-clamp-3">
-                      {preset.rawText.split("\n").slice(2, 5).join(" ")}
-                    </p>
-                  </div>
-
-                  <button
-    id={`btn-load-preset-${idx}`}
-    onClick={async () => {
-      setRawText(preset.rawText);
-      await runGeminiParser(preset.rawText, preset.title);
-    }}
-    disabled={isParsing}
-    className="w-full py-1.5 px-3 bg-zinc-800 hover:bg-indigo-600 text-zinc-200 hover:text-white rounded-lg text-xs font-semibold transition flex items-center justify-center gap-1.5"
-  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                    <span>Load & Parse This Paper</span>
-                  </button>
-                </div>)}
-            </div>
-          </div>}
-
-        {
-    /* TAB 4: Automated Testing Suite */
+    /* TAB 3: Automated Testing Suite */
   }
         {activeTab === "automated_testing" && <div className="p-6">
             <AutomatedTestingSuite

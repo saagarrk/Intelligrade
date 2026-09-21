@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { getGenAIClient } from '../../backend/geminiOcrService';
 import { ApiResponse } from '../common/apiResponse';
+import { BadRequestError } from '../common/errors';
 import { gradeService } from '../services/grade.service';
 
 function extractQuestionsServerHeuristic(rawText: string, examTitle?: string, subject?: string) {
@@ -28,19 +29,7 @@ function extractQuestionsServerHeuristic(rawText: string, examTitle?: string, su
   }
 
   if (questions.length === 0) {
-    questions.push({
-      id: 'q_1_default',
-      questionNumber: 1,
-      questionText: rawText.slice(0, 300) || 'Explain the theoretical foundations and implementation details.',
-      maxMarks: 10,
-      topic: subject || 'Computer Science',
-      difficulty: 'Medium',
-      modelAnswer: 'Comprehensive explanation with key definitions, formulas, and diagrams.',
-      keyConcepts: [
-        { concept: 'Theoretical Principles', weightMarks: 5, synonyms: [], description: 'Core definitions' },
-        { concept: 'Applied Analysis', weightMarks: 5, synonyms: [], description: 'Implementation' }
-      ]
-    });
+    throw new BadRequestError('Unable to extract any structured questions from the provided question paper text.');
   }
 
   return {

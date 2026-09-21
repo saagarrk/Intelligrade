@@ -262,7 +262,7 @@ class OcrService:
 
         # Multimodal OCR Text Extraction
         extracted_text = ""
-        confidence = 0.95
+        confidence = 0.0
         used_gemini = False
 
         # Attempt Gemini Vision multimodal transcription if API key is in environment
@@ -275,15 +275,23 @@ class OcrService:
                     confidence = 0.97
                     used_gemini = True
             except Exception as gemini_err:
-                logger.warning(
-                    f"[OCR Service] Gemini transcription call failed on page {page_number} ({str(gemini_err)}). "
-                    "Falling back to resilient handwriting parser."
+                logger.error(
+                    f"[OCR Service] Gemini transcription call failed on page {page_number}: {str(gemini_err)}"
                 )
 
-        # Resilient local fallback if Gemini is not available or returned empty
+        # Do not substitute synthetic/mock student answers
         if not extracted_text:
-            extracted_text, confidence = cls._fallback_handwriting_extraction(
-                active_b64, questions, page_number
+            return PageOcrResult(
+                page_number=page_number,
+                text="",
+                confidence=0.0,
+                word_count=0,
+                lines=[],
+                detected_answers=[],
+                preprocessed=preprocessed_applied,
+                skew_angle_deg=skew_angle,
+                status="FAILED",
+                error_message="OCR extraction failed: No legible text identified on page or Gemini API key is unconfigured."
             )
 
         # Parse transcribed text into structured lines and question answers
@@ -421,34 +429,9 @@ class OcrService:
         page_number: int
     ) -> tuple[str, float]:
         """
-        Deterministic local OCR fallback for handwriting transcription.
-        Constructs clean, structured student answers based on available rubrics and image metrics,
-        guaranteeing zero 500 errors if offline or when external vision APIs are unconfigured.
+        No mock text generation. If OCR cannot detect text, return empty.
         """
-        lines_text: List[str] = []
-
-        if questions and len(questions) > 0:
-            # Distribute questions across pages if multi-page, or all on single page
-            for q in questions:
-                q_num = getattr(q, 'question_number', 1)
-                q_text = getattr(q, 'question_text', 'General Concept')
-                model_ans = getattr(q, 'model_answer', '')
-                
-                # Derive realistic student handwriting draft matching question scope
-                first_sentence = model_ans.split('.')[0] if model_ans else f"The principle of {q_text} is applied in technical systems."
-                student_draft = (
-                    f"Ans {q_num}: {first_sentence}. In addition, the fundamental mechanism utilizes "
-                    f"structured protocols to maintain state consistency and verify end-to-end data integrity."
-                )
-                lines_text.append(student_draft)
-        else:
-            lines_text.append(
-                f"Ans 1: The candidate examination submission was successfully acquired on Page {page_number}. "
-                "Core concepts, technical definitions, and procedural workflows are detailed throughout the response."
-            )
-
-        transcription = "\n\n".join(lines_text)
-        return transcription, 0.95
+        return "", 0.0
 
     @classmethod
     def _parse_lines(

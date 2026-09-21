@@ -144,7 +144,7 @@ public class ExamServiceImpl implements ExamService {
     private List<QuestionDto> extractQuestionsFromText(String rawText, String subjectHint) {
         List<QuestionDto> questions = new ArrayList<>();
         if (rawText == null || rawText.isBlank()) {
-            return generateSubjectQuestions(subjectHint);
+            throw new IllegalArgumentException("Question paper raw text is empty. Cannot extract questions without text content.");
         }
 
         String[] lines = rawText.split("\n");
@@ -190,7 +190,7 @@ public class ExamServiceImpl implements ExamService {
         }
 
         if (questions.isEmpty()) {
-            return generateSubjectQuestions(subjectHint);
+            throw new IllegalArgumentException("No structured questions could be parsed from the question paper text.");
         }
 
         return questions;

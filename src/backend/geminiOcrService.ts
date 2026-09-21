@@ -526,24 +526,20 @@ export async function performHandwrittenOcrAndParse(
 
   // 1. Sanitize image input
   if (!imageInput) {
-    return generateSmartOcrFallback(options, 'No image data provided');
+    throw new Error('No image data provided for OCR processing');
   }
 
   const { cleanBase64, detectedMimeType } = sanitizeImageBase64(imageInput);
   const effectiveMimeType = options.mimeType || detectedMimeType || 'image/jpeg';
 
   if (!cleanBase64 || cleanBase64.length < 20) {
-    return generateSmartOcrFallback(options, 'Invalid or empty base64 image data');
+    throw new Error('Invalid or empty image data received for OCR processing');
   }
 
   // 2. Resolve Gemini client
-  if (options.mockMode) {
-    return generateSmartOcrFallback(options, 'Mock mode active for fast testing');
-  }
-
   const ai = client || getGenAIClient();
   if (!ai) {
-    return generateSmartOcrFallback(options, 'GEMINI_API_KEY is not configured in server environment');
+    throw new Error('GEMINI_API_KEY is not configured in server environment. Real OCR extraction requires a valid Gemini API key.');
   }
 
   // 3. Construct structured multimodal prompt for handwritten exam sheets
@@ -615,20 +611,17 @@ Return a valid JSON object matching this exact schema:
     const responseText = response.text || '';
 
     if (!responseText.trim()) {
-      return generateSmartOcrFallback(options, 'Gemini returned empty response text');
+      throw new Error('Gemini OCR returned empty response text. No handwritten text could be identified.');
     }
 
     const parsed = parseOcrTranscriptionOutput(responseText, options, durationMs);
     if (!parsed.fullExtractedText || parsed.fullExtractedText.trim().length === 0 || parsed.parsedAnswers.length === 0) {
-      return generateSmartOcrFallback(options, 'No legible text detected on scan image');
+      throw new Error('No legible handwritten text or questions could be identified on the uploaded scan.');
     }
 
     return parsed;
   } catch (error: any) {
-    const durationMs = Date.now() - startTime;
-    console.warn('Gemini OCR transcription notice (activating adaptive OCR parser):', error?.message || error);
-    const fallback = generateSmartOcrFallback(options, error?.message || 'Gemini OCR API error');
-    fallback.durationMs = durationMs;
-    return fallback;
+    console.error('Gemini OCR transcription failed:', error?.message || error);
+    throw new Error(`Handwritten OCR processing failed: ${error?.message || 'Unable to transcribe handwritten scan'}`);
   }
 }

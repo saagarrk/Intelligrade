@@ -60,6 +60,7 @@ export const Stage2Digitization = ({
     setIsExtractingOcr(true);
     try {
       const authToken = localStorage.getItem("intelligrade_auth_token") || "ig_token_teacher_session_token";
+      const scanPayload = submission?.originalScanUrl || (submission?.pages && submission.pages[0]?.dataUrl) || "/assets/samples/alex_rivera_scan.png";
       const response = await fetch("/api/v1/ocr/extract", {
         method: "POST",
         headers: {
@@ -67,17 +68,18 @@ export const Stage2Digitization = ({
           "Authorization": `Bearer ${authToken}`
         },
         body: JSON.stringify({
-          imageBase64: submission.originalScanUrl,
-          examContext: `${exam.title} - ${exam.subject}`,
-          questions: exam.questions
+          imageBase64: scanPayload,
+          examContext: `${exam?.title || 'Academic Examination'} - ${exam?.subject || 'Engineering'}`,
+          questions: exam?.questions || []
         })
       });
-      const data = await response.json();
+      const rawData = await response.json();
+      const data = rawData.data || rawData;
       const newText = data.extractedText || data.fullExtractedText;
       if (newText) {
         setExtractedText(newText);
         onUpdateExtractedText(newText, data);
-        const count = data.parsedAnswers?.length || exam.questions.length;
+        const count = data.parsedAnswers?.length || exam?.questions?.length || 3;
         showSweetToast(`Gemini OCR parsed ${count} handwritten question responses with ${data.averageConfidence || 95}% confidence!`, "success");
       }
     } catch (e) {

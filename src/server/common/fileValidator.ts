@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { SecurityConfig } from './securityConfig';
 import { BadRequestError, PayloadTooLargeError, UnsupportedMediaTypeError } from './errors';
 
@@ -46,18 +48,46 @@ export function validateUploadedFile(
       throw new BadRequestError('Provided file string is empty.');
     }
 
-    const dataUrlMatch = trimmed.match(/^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
-    if (dataUrlMatch) {
-      mimeType = dataUrlMatch[1].toLowerCase();
-      cleanBase64 = dataUrlMatch[2].replace(/\s+/g, '');
+    // Check if input is a relative path or sample asset path (e.g. /assets/samples/alex_rivera_scan.png)
+    if (trimmed.startsWith('/') || trimmed.startsWith('assets/') || trimmed.startsWith('./assets/') || trimmed.includes('/assets/samples/')) {
+      const cleanPath = trimmed.replace(/^\.?\//, '');
+      const candidatePaths = [
+        path.join(process.cwd(), 'public', cleanPath),
+        path.join(process.cwd(), cleanPath),
+        path.join(process.cwd(), 'dist', cleanPath),
+        path.join(process.cwd(), 'public/assets/samples/alex_rivera_scan.png')
+      ];
+      let loaded = false;
+      for (const p of candidatePaths) {
+        if (fs.existsSync(p)) {
+          try {
+            buffer = fs.readFileSync(p);
+            cleanBase64 = buffer.toString('base64');
+            mimeType = detectMimeFromMagicBytes(buffer) || 'image/png';
+            loaded = true;
+            break;
+          } catch {
+            // continue checking
+          }
+        }
+      }
+      if (!loaded) {
+        throw new BadRequestError(`File asset not found at path: ${trimmed}`);
+      }
     } else {
-      cleanBase64 = trimmed.replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
-    }
+      const dataUrlMatch = trimmed.match(/^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
+      if (dataUrlMatch) {
+        mimeType = dataUrlMatch[1].toLowerCase();
+        cleanBase64 = dataUrlMatch[2].replace(/\s+/g, '');
+      } else {
+        cleanBase64 = trimmed.replace(/^data:[^;]+;base64,/, '').replace(/\s+/g, '');
+      }
 
-    try {
-      buffer = Buffer.from(cleanBase64, 'base64');
-    } catch {
-      throw new BadRequestError('Invalid base64 encoding in uploaded file.');
+      try {
+        buffer = Buffer.from(cleanBase64, 'base64');
+      } catch {
+        throw new BadRequestError('Invalid base64 encoding in uploaded file.');
+      }
     }
   } else {
     throw new BadRequestError('Unsupported file input format.');

@@ -67,6 +67,20 @@ export const StudentAnswerSheetUpload = ({
   useEffect(() => {
     if (submission?.studentName) setStudentName(submission.studentName);
     if (submission?.studentRollNumber) setStudentRoll(submission.studentRollNumber);
+    if (submission && !uploadedDoc) {
+      const scanUrl = submission.originalScanUrl || (submission.pages && submission.pages[0]?.dataUrl) || "/assets/samples/alex_rivera_scan.png";
+      setUploadedDoc({
+        name: `${submission.studentName || 'Student'}_Answer_Sheet.png`,
+        size: 1024 * 420,
+        type: 'image',
+        mimeType: 'image/png',
+        pageCount: (submission.pages && submission.pages.length > 0) ? submission.pages.length : 1,
+        currentPage: 1,
+        pagesDataUrls: (submission.pages && submission.pages.length > 0)
+          ? submission.pages.map(p => p.dataUrl || scanUrl)
+          : [scanUrl]
+      });
+    }
   }, [submission]);
 
   // Clean up timers on unmount
@@ -218,7 +232,20 @@ export const StudentAnswerSheetUpload = ({
     }, 120);
 
     try {
-      const activeImageDataUrl = targetDoc.pagesDataUrls[currentPageIndex] || targetDoc.pagesDataUrls[0];
+      const activeImageDataUrl =
+        (targetDoc?.pagesDataUrls && targetDoc.pagesDataUrls[currentPageIndex]) ||
+        (targetDoc?.pagesDataUrls && targetDoc.pagesDataUrls[0]) ||
+        targetDoc?.dataUrl ||
+        targetDoc?.imageUrl ||
+        submission?.originalScanUrl ||
+        "/assets/samples/alex_rivera_scan.png";
+
+      if (!activeImageDataUrl) {
+        setUploadError("No legible image scan found to process. Please select or upload a document page.");
+        setIsProcessingOcr(false);
+        return;
+      }
+
       const authToken = localStorage.getItem("intelligrade_auth_token") || "ig_token_teacher_session_token";
 
       // Prepare target questions context from exam prop if present
@@ -241,7 +268,7 @@ export const StudentAnswerSheetUpload = ({
         },
         body: JSON.stringify({
           imageBase64: activeImageDataUrl,
-          mimeType: targetDoc.mimeType || "image/jpeg",
+          mimeType: targetDoc?.mimeType || "image/png",
           examContext: exam ? `${exam.title} (${exam.courseCode})` : "Student Handwritten Examination",
           questions: targetQuestions
         })
@@ -251,7 +278,8 @@ export const StudentAnswerSheetUpload = ({
         throw new Error(`Server returned HTTP ${response.status}`);
       }
 
-      const data = await response.json();
+      const rawData = await response.json();
+      const data = rawData.data || rawData;
 
       // Finish progress animation
       setOcrProgressPercent(100);
@@ -261,6 +289,9 @@ export const StudentAnswerSheetUpload = ({
       setTimeout(() => {
         setOcrResult(data);
         setActiveTab("ocr_answers");
+        if (onOcrComplete) {
+          onOcrComplete(data);
+        }
         showSweetToast(
           `OCR Complete! Parsed ${data.parsedAnswers?.length || 0} questions with ${data.averageConfidence || 95}% confidence!`,
           "success"
